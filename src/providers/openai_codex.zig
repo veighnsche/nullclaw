@@ -410,18 +410,27 @@ fn codexStreamRequest(
         argc += 1;
     }
 
-    argv_buf[argc] = "-d";
+    argv_buf[argc] = "--data-binary";
     argc += 1;
-    argv_buf[argc] = body;
+    argv_buf[argc] = "@-";
     argc += 1;
     argv_buf[argc] = url;
     argc += 1;
 
     var child = std.process.Child.init(argv_buf[0..argc], allocator);
+    child.stdin_behavior = .Pipe;
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Ignore;
 
     try child.spawn();
+
+    if (child.stdin) |stdin_file| {
+        stdin_file.writeAll(body) catch return error.CurlWriteError;
+        stdin_file.close();
+        child.stdin = null;
+    } else {
+        return error.CurlWriteError;
+    }
 
     // Read stdout line by line, parse Codex SSE events
     var accumulated: std.ArrayListUnmanaged(u8) = .empty;
