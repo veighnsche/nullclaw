@@ -263,6 +263,12 @@ Acceptance:
 
 ## Step 9 - Implement workflows in order
 
+Status (March 5, 2026):
+
+- Zig workflow dispatch scaffolds are in place for all four workflow names.
+- Current behavior is deterministic and side-effect-safe (scaffold summaries only).
+- Full workflow implementation is still pending.
+
 Priority order:
 
 1. `social_draft_and_approve`
