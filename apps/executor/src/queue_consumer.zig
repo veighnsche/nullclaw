@@ -3,6 +3,8 @@ const edge = @import("edge");
 const task_runner = @import("task_runner.zig");
 const notifier = @import("notify/whatsapp_terminal_notifier.zig");
 
+const MAX_WORKFLOW_ATTEMPTS: u8 = 3;
+
 pub const ConsumeOutcome = struct {
     task_id: []u8,
     workflow: []u8,
@@ -35,6 +37,7 @@ pub fn consume_once(allocator: std.mem.Allocator, raw_message: []const u8) !Cons
 
     if (!edge.queue_handoff.can_enqueue_status(.queued)) return error.InvalidQueueState;
     if (!edge.task_ledger.is_valid_status_transition(.queued, .running)) return error.InvalidStateTransition;
+    if (message.attempts >= MAX_WORKFLOW_ATTEMPTS) return error.MaxAttemptsExceeded;
 
     const run_result = task_runner.run_task(message.workflow, message.prompt);
     const terminal_status: edge.contracts.TaskStatus = switch (run_result.terminal_status) {
@@ -58,7 +61,7 @@ pub fn consume_once(allocator: std.mem.Allocator, raw_message: []const u8) !Cons
 
 test "consume_once_runs_echo_summary_from_queue_payload" {
     const payload =
-        \\{"task_id":"task-1","workflow":"echo_summary","prompt":"hello","requested_by":"user_a","channel":"whatsapp"}
+        \\{"task_id":"task-1","workflow":"echo_summary","prompt":"hello","requested_by":"user_a","channel":"whatsapp","attempts":0}
     ;
 
     var outcome = try consume_once(std.testing.allocator, payload);
@@ -70,4 +73,11 @@ test "consume_once_runs_echo_summary_from_queue_payload" {
     try std.testing.expectEqualStrings("whatsapp", outcome.channel);
     try std.testing.expectEqual(edge.contracts.TaskStatus.succeeded, outcome.terminal_status);
     try std.testing.expectEqual(notifier.TerminalStatus.succeeded, outcome.notifier_status());
+}
+
+test "consume_once_rejects_when_attempts_exhausted" {
+    const payload =
+        \\{"task_id":"task-1","workflow":"echo_summary","prompt":"hello","requested_by":"user_a","channel":"whatsapp","attempts":3}
+    ;
+    try std.testing.expectError(error.MaxAttemptsExceeded, consume_once(std.testing.allocator, payload));
 }

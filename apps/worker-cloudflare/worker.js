@@ -233,6 +233,7 @@ async function enqueue_task(queue, task) {
     prompt: task.prompt,
     requested_by: task.requested_by,
     channel: task.channel,
+    attempts: 0,
   });
 }
 

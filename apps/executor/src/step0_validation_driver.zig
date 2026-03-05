@@ -7,6 +7,7 @@ const QueueMessage = struct {
     prompt: []const u8,
     requested_by: []const u8,
     channel: []const u8,
+    attempts: u8 = 0,
 };
 
 pub fn main() !void {
