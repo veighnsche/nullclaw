@@ -137,3 +137,33 @@ test("worker blocks sender after per-minute limit", async () => {
   assert.equal(body3.error, "sender_rate_limit_exceeded");
   assert.equal(env.TASK_QUEUE.messages.length, 2);
 });
+
+test("worker rejects oversized prompt before queue handoff", async () => {
+  const secret = "guardrails-secret";
+  const env = {
+    WHATSAPP_WEBHOOK_SECRET: secret,
+    MAX_PROMPT_BYTES: "8",
+    WHATSAPP_DEDUP: new MockKVNamespace(),
+    TASKS_DB: new MockD1Database(),
+    TASK_QUEUE: new MockQueue(),
+  };
+
+  const payload = {
+    task_id: "task-oversize",
+    message_id: "msg-oversize",
+    workflow: "echo_summary",
+    prompt: "this prompt is too large",
+    requested_by: "rodger",
+    channel: "whatsapp",
+    risk_level: "low",
+    action_target: "local",
+  };
+
+  const request = await signed_request(payload, secret);
+  const response = await worker.fetch(request, env);
+  assert.equal(response.status, 413);
+  const body = await response.json();
+  assert.equal(body.error, "prompt_too_large");
+  assert.equal(body.max_prompt_bytes, 8);
+  assert.equal(env.TASK_QUEUE.messages.length, 0);
+});

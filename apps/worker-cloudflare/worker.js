@@ -6,6 +6,7 @@ const VALID_RISK_LEVELS = new Set(["low", "medium", "high"]);
 const VALID_ACTION_TARGETS = new Set(["local", "external_account", "public_publish", "money"]);
 const DEFAULT_DAILY_TASK_LIMIT = 50;
 const DEFAULT_PER_MINUTE_TASK_LIMIT = 10;
+const DEFAULT_MAX_PROMPT_BYTES = 4000;
 
 function json_response(status, body) {
   return new Response(JSON.stringify(body), {
@@ -155,6 +156,11 @@ async function check_and_increment_sender_limits(env, requested_by) {
   await env.WHATSAPP_DEDUP.put(daily_key, `${daily_count + 1}`, { expirationTtl: 2 * ONE_DAY_SECONDS });
   await env.WHATSAPP_DEDUP.put(minute_key, `${minute_count + 1}`, { expirationTtl: 2 * 60 });
   return null;
+}
+
+function exceeds_prompt_size_limit(prompt, env) {
+  const max_prompt_bytes = read_positive_int_env(env.MAX_PROMPT_BYTES, DEFAULT_MAX_PROMPT_BYTES);
+  return new TextEncoder().encode(prompt).length > max_prompt_bytes;
 }
 
 async function is_duplicate_message(kv, message_id) {
@@ -348,6 +354,13 @@ export default {
     const duplicate = await is_duplicate_message(env.WHATSAPP_DEDUP, parsed.message_id);
     if (duplicate) {
       return json_response(200, { status: "duplicate_ignored", message_id: parsed.message_id });
+    }
+
+    if (exceeds_prompt_size_limit(parsed.prompt, env)) {
+      return json_response(413, {
+        error: "prompt_too_large",
+        max_prompt_bytes: read_positive_int_env(env.MAX_PROMPT_BYTES, DEFAULT_MAX_PROMPT_BYTES),
+      });
     }
 
     const limit_error = await check_and_increment_sender_limits(env, parsed.requested_by);

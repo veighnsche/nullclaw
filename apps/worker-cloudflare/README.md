@@ -40,6 +40,7 @@ Optional guardrail env vars:
 
 - `DAILY_TASK_LIMIT` (default `50`)
 - `PER_MINUTE_TASK_LIMIT` (default `10`)
+- `MAX_PROMPT_BYTES` (default `4000`)
 
 HTTP routes:
 
