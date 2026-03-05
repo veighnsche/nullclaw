@@ -1,6 +1,6 @@
 # reservation_call_assistant
 
-Status: stub
+Status: scaffolded
 
 Goal:
 - Coordinate reservation-call workflow steps with explicit approvals.
@@ -13,3 +13,7 @@ Inputs:
 Output:
 - `terminal_status`
 - `call_result`
+
+Current scaffold behavior:
+- returns deterministic failure summary
+- no call execution or outbound side effects yet

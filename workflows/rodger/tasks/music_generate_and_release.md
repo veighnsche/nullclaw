@@ -1,6 +1,6 @@
 # music_generate_and_release
 
-Status: stub
+Status: scaffolded
 
 Goal:
 - Generate music artifacts and route release actions behind risk gates.
@@ -14,3 +14,7 @@ Output:
 - `terminal_status`
 - `artifact_refs`
 - `release_state`
+
+Current scaffold behavior:
+- returns deterministic failure summary
+- no generation/distribution side effects yet

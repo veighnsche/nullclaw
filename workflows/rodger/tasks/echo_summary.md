@@ -1,6 +1,6 @@
 # echo_summary
 
-Status: stub
+Status: scaffolded
 
 Goal:
 - Return a short deterministic summary for a text input.
