@@ -155,3 +155,32 @@ test("worker enforces daily sender budget cap", async () => {
   assert.equal(body.error, "daily_budget_exceeded");
   assert.equal(env.TASK_QUEUE.messages.length, 1);
 });
+
+test("worker enforces model token estimate cap", async () => {
+  const secret = "guardrails-secret";
+  const env = {
+    WHATSAPP_WEBHOOK_SECRET: secret,
+    MAX_MODEL_TOKENS: "2",
+    WHATSAPP_DEDUP: new MockKVNamespace(),
+    TASKS_DB: new MockD1Database(),
+    TASK_QUEUE: new MockQueue(),
+  };
+
+  const payload = {
+    task_id: "task-token-limit",
+    message_id: "msg-token-limit",
+    workflow: "echo_summary",
+    prompt: "this exceeds two tokens",
+    requested_by: "rodger",
+    channel: "whatsapp",
+    risk_level: "low",
+    action_target: "local",
+  };
+
+  const response = await worker.fetch(await signed_request("/", payload, secret), env);
+  assert.equal(response.status, 413);
+  const body = await response.json();
+  assert.equal(body.error, "model_token_limit_exceeded");
+  assert.equal(body.max_model_tokens, 2);
+  assert.equal(env.TASK_QUEUE.messages.length, 0);
+});

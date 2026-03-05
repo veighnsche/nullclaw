@@ -41,6 +41,7 @@ Optional guardrail env vars:
 - `DAILY_TASK_LIMIT` (default `50`)
 - `PER_MINUTE_TASK_LIMIT` (default `10`)
 - `MAX_PROMPT_BYTES` (default `4000`)
+- `MAX_MODEL_TOKENS` (default `2000`, estimated as `ceil(prompt_bytes / 4)`)
 - `FAILURES_BEFORE_COOLDOWN` (default `3`)
 - `FAILURE_COOLDOWN_SECONDS` (default `300`)
 - `DAILY_COST_BUDGET_CENTS` (default `10000`)

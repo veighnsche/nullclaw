@@ -9,6 +9,7 @@ const VALID_ACTION_TARGETS = new Set(["local", "external_account", "public_publi
 const DEFAULT_DAILY_TASK_LIMIT = 50;
 const DEFAULT_PER_MINUTE_TASK_LIMIT = 10;
 const DEFAULT_MAX_PROMPT_BYTES = 4000;
+const DEFAULT_MAX_MODEL_TOKENS = 2000;
 const DEFAULT_FAILURES_BEFORE_COOLDOWN = 3;
 const DEFAULT_FAILURE_COOLDOWN_SECONDS = 300;
 const DEFAULT_DAILY_COST_BUDGET_CENTS = 10000;
@@ -168,6 +169,11 @@ async function check_and_increment_sender_budget(env, requested_by, estimated_co
 function exceeds_prompt_size_limit(prompt, env) {
   const max_prompt_bytes = read_positive_int_env(env.MAX_PROMPT_BYTES, DEFAULT_MAX_PROMPT_BYTES);
   return new TextEncoder().encode(prompt).length > max_prompt_bytes;
+}
+
+function estimate_model_tokens(prompt) {
+  const prompt_bytes = new TextEncoder().encode(prompt).length;
+  return Math.ceil(prompt_bytes / 4);
 }
 
 async function is_sender_in_cooldown(env, requested_by) {
@@ -399,6 +405,16 @@ export default {
       return json_response(413, {
         error: "prompt_too_large",
         max_prompt_bytes: read_positive_int_env(env.MAX_PROMPT_BYTES, DEFAULT_MAX_PROMPT_BYTES),
+      });
+    }
+
+    const max_model_tokens = read_positive_int_env(env.MAX_MODEL_TOKENS, DEFAULT_MAX_MODEL_TOKENS);
+    const estimated_tokens = estimate_model_tokens(parsed.prompt);
+    if (estimated_tokens > max_model_tokens) {
+      return json_response(413, {
+        error: "model_token_limit_exceeded",
+        max_model_tokens,
+        estimated_tokens,
       });
     }
 
