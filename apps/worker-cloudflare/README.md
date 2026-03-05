@@ -22,3 +22,15 @@ Suggested bindings:
 - `D1`: durable task ledger and approval state.
 - `Queues`: async handoff to executor/orchestrator.
 - `R2`: artifacts (audio, PDFs, image outputs).
+
+Language boundary:
+
+- Keep this app as a thin transport adapter.
+- Put policy/state/business logic in Zig (`src/edge`, `apps/executor`).
+- Avoid duplicating policy logic in worker runtime code.
+
+Required binding names:
+
+- `WHATSAPP_DEDUP` (KV)
+- `TASKS_DB` (D1)
+- `TASK_QUEUE` (Queue producer)
