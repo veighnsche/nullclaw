@@ -242,6 +242,11 @@ Acceptance:
 
 Define adapter contracts first, vendor second.
 
+Status (March 5, 2026):
+
+- [x] Contract docs scaffolded for `elevenlabs`, `social`, `booking`, and `suno`.
+- [ ] Runtime adapter implementations still pending.
+
 Add interface documents and stubs for:
 
 - `integrations/elevenlabs`
@@ -322,6 +327,12 @@ Mandatory controls:
 - signed callback validation
 - strict JSON schema validation on queue payloads
 
+Status (March 5, 2026):
+
+- [x] signed callback validation (`sha256=<hmac>`) in worker adapter
+- [x] strict queue payload validation in Zig queue parser
+- [ ] remaining controls (secret scanning/redaction tests, outbound allowlist) pending
+
 Acceptance:
 
 - secret scan passes
@@ -337,6 +348,14 @@ Add guardrails:
 - max retries per workflow
 - rate limits by sender
 - cooldown for repeated failures
+
+Status (March 5, 2026):
+
+- [x] per-user daily budget cap (cost estimate based)
+- [x] max retries per workflow (attempt gate in executor)
+- [x] rate limits by sender
+- [x] cooldown for repeated failures
+- [ ] per-task max model tokens is pending (current proxy: ingress prompt byte limit)
 
 Acceptance:
 
