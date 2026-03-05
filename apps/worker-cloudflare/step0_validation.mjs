@@ -99,7 +99,12 @@ function require_step0_prerequisites(options = {}) {
 function run_executor_driver(repo_root, queue_message, options = {}) {
   const { zig_bin } = require_step0_prerequisites(options);
   const input_json = `${JSON.stringify(queue_message)}\n`;
-  const result = spawnSync(zig_bin, ["run", "apps/executor/src/step0_validation_driver.zig"], {
+  const result = spawnSync(zig_bin, [
+    "run",
+    "--dep", "edge",
+    "-Mroot=apps/executor/src/main.zig",
+    "-Medge=src/edge/mod.zig",
+  ], {
     cwd: repo_root,
     input: input_json,
     encoding: "utf8",

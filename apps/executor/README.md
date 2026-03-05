@@ -19,3 +19,14 @@ Security baseline:
 Deployment target:
 
 - Any container host with shell + filesystem support (for example Cloud Run, Fly, or VM).
+
+Local one-shot execution:
+
+```bash
+printf '%s\n' '{"task_id":"task-1","workflow":"echo_summary","prompt":"hello","requested_by":"user_a","channel":"whatsapp","attempts":0}' | zig run --dep edge -Mroot=apps/executor/src/main.zig -Medge=src/edge/mod.zig
+```
+
+Optional callback delivery env vars:
+
+- `NULLCLAW_EXECUTOR_CALLBACK_URL` — HTTPS `POST /terminal` endpoint
+- `NULLCLAW_EXECUTOR_CALLBACK_SECRET` — HMAC secret for `x-nullclaw-signature`

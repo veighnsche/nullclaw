@@ -73,7 +73,7 @@ If Zig is missing, the script exits early with a prerequisite error instead of a
 This validates:
 
 - ingest webhook -> D1 queued row -> queue handoff
-- Zig executor workflow run (`echo_summary`) via local driver
+- Zig executor main process consumes one queue payload and emits one terminal callback payload
 - terminal callback -> D1 terminal state/event update
 
 Deterministic regression test:

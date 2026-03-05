@@ -25,10 +25,10 @@ Done in code:
 - [x] Zig edge helpers exist for approval parsing, queue validation, and task status transitions.
 - [x] `echo_summary` exists as the one implemented low-risk workflow.
 - [x] Step 0 validation has been re-verified on Zig `0.15.2`.
+- [x] Executor main process can consume one queue payload and emit or POST a signed terminal callback payload.
 - [x] Guardrails exist for signature verification, rate limits, budget caps, prompt size, token estimate limits, and failure cooldowns.
 
 Partial or blocked:
-- [ ] Executor consume logic exists, but the executor service entrypoint is still a stub.
 - [ ] `social_draft_and_approve` exists only as a scaffolded success path; it does not yet drive a real `waiting_approval` lifecycle.
 - [ ] The workflow contract is only partially implemented; current workflow dispatch is still mostly `workflow + prompt -> terminal summary`.
 
@@ -79,15 +79,19 @@ Target files:
 - `apps/executor/README.md`
 
 Checklist:
-- [ ] replace the stub `main()` with real startup logic
-- [ ] wire queue payload -> consume_once -> terminal callback request
-- [ ] move task lifecycle through `queued -> running -> terminal`
-- [ ] keep retry and attempt limits enforced in the executor path
-- [ ] add tests for service startup failure paths and terminal payload formatting
+- [x] replace the stub `main()` with real startup logic
+- [x] wire queue payload -> consume_once -> terminal callback request
+- [x] move task lifecycle through `queued -> running -> terminal`
+- [x] keep retry and attempt limits enforced in the executor path
+- [x] add tests for service startup failure paths and terminal payload formatting
 
 Acceptance:
 - executor can be started locally as a process
 - local run can consume one `echo_summary` queue payload and produce a valid terminal callback payload
+
+Current status:
+- executor main has replaced the stub entrypoint
+- local one-shot run produces a valid worker `/terminal` payload
 
 ### PR 3 - deploy the thin edge and executor plumbing
 
