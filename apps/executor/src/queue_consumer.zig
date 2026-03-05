@@ -28,7 +28,7 @@ pub const ConsumeOutcome = struct {
 };
 
 pub fn consume_once(allocator: std.mem.Allocator, raw_message: []const u8) !ConsumeOutcome {
-    var parsed = try std.json.parseFromSlice(edge.queue_handoff.QueueMessage, allocator, raw_message, .{});
+    var parsed = try edge.queue_handoff.parse_queue_message_json(allocator, raw_message);
     defer parsed.deinit();
 
     const message = parsed.value;

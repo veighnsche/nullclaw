@@ -1,6 +1,12 @@
 const std = @import("std");
 const contracts = @import("contracts.zig");
 
+pub const MAX_TASK_ID_LEN: usize = 128;
+pub const MAX_WORKFLOW_LEN: usize = 96;
+pub const MAX_REQUESTED_BY_LEN: usize = 128;
+pub const MAX_CHANNEL_LEN: usize = 64;
+pub const MAX_PROMPT_LEN: usize = 8192;
+
 pub const QueueMessage = struct {
     task_id: []const u8,
     workflow: []const u8,
@@ -28,6 +34,16 @@ pub fn can_enqueue_status(status: contracts.TaskStatus) bool {
     return status == .queued;
 }
 
+pub fn parse_queue_message_json(allocator: std.mem.Allocator, raw_json: []const u8) !std.json.Parsed(QueueMessage) {
+    var parsed = std.json.parseFromSlice(QueueMessage, allocator, raw_json, .{
+        .ignore_unknown_fields = false,
+    }) catch return error.InvalidQueuePayload;
+    errdefer parsed.deinit();
+
+    validate_queue_message(parsed.value) catch return error.InvalidQueuePayload;
+    return parsed;
+}
+
 pub fn encode_queue_message_json(allocator: std.mem.Allocator, message: QueueMessage) ![]u8 {
     return std.fmt.allocPrint(
         allocator,
@@ -41,6 +57,24 @@ pub fn encode_queue_message_json(allocator: std.mem.Allocator, message: QueueMes
             std.json.fmt(message.channel, .{}),
         },
     );
+}
+
+pub fn validate_queue_message(message: QueueMessage) !void {
+    if (message.task_id.len == 0 or message.task_id.len > MAX_TASK_ID_LEN) return error.InvalidQueuePayload;
+    if (message.workflow.len == 0 or message.workflow.len > MAX_WORKFLOW_LEN) return error.InvalidQueuePayload;
+    if (message.requested_by.len == 0 or message.requested_by.len > MAX_REQUESTED_BY_LEN) return error.InvalidQueuePayload;
+    if (message.channel.len == 0 or message.channel.len > MAX_CHANNEL_LEN) return error.InvalidQueuePayload;
+    if (message.prompt.len == 0 or message.prompt.len > MAX_PROMPT_LEN) return error.InvalidQueuePayload;
+
+    if (has_nul_byte(message.task_id)) return error.InvalidQueuePayload;
+    if (has_nul_byte(message.workflow)) return error.InvalidQueuePayload;
+    if (has_nul_byte(message.requested_by)) return error.InvalidQueuePayload;
+    if (has_nul_byte(message.channel)) return error.InvalidQueuePayload;
+    if (has_nul_byte(message.prompt)) return error.InvalidQueuePayload;
+}
+
+fn has_nul_byte(value: []const u8) bool {
+    return std.mem.indexOfScalar(u8, value, 0) != null;
 }
 
 test "message_from_envelope_requires_task_id" {
@@ -96,4 +130,33 @@ test "encode_queue_message_json_emits_fields" {
         "{\"task_id\":\"task-42\",\"workflow\":\"echo_summary\",\"prompt\":\"hello\",\"requested_by\":\"user_a\",\"channel\":\"whatsapp\"}",
         encoded,
     );
+}
+
+test "parse_queue_message_json_rejects_unknown_fields" {
+    const raw =
+        \\{"task_id":"task-1","workflow":"echo_summary","prompt":"hello","requested_by":"user_a","channel":"whatsapp","extra":"nope"}
+    ;
+    try std.testing.expectError(error.InvalidQueuePayload, parse_queue_message_json(std.testing.allocator, raw));
+}
+
+test "parse_queue_message_json_rejects_missing_required_field" {
+    const raw =
+        \\{"task_id":"task-1","prompt":"hello","requested_by":"user_a","channel":"whatsapp"}
+    ;
+    try std.testing.expectError(error.InvalidQueuePayload, parse_queue_message_json(std.testing.allocator, raw));
+}
+
+test "validate_queue_message_rejects_oversized_prompt" {
+    const long_prompt = try std.testing.allocator.alloc(u8, MAX_PROMPT_LEN + 1);
+    defer std.testing.allocator.free(long_prompt);
+    @memset(long_prompt, 'x');
+
+    const message = QueueMessage{
+        .task_id = "task-1",
+        .workflow = "echo_summary",
+        .prompt = long_prompt,
+        .requested_by = "user_a",
+        .channel = "whatsapp",
+    };
+    try std.testing.expectError(error.InvalidQueuePayload, validate_queue_message(message));
 }
