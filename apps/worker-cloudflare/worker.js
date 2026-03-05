@@ -4,6 +4,8 @@ const TERMINAL_STATUS_SUCCEEDED = "succeeded";
 const TERMINAL_STATUS_FAILED = "failed";
 const VALID_RISK_LEVELS = new Set(["low", "medium", "high"]);
 const VALID_ACTION_TARGETS = new Set(["local", "external_account", "public_publish", "money"]);
+const DEFAULT_DAILY_TASK_LIMIT = 50;
+const DEFAULT_PER_MINUTE_TASK_LIMIT = 10;
 
 function json_response(status, body) {
   return new Response(JSON.stringify(body), {
@@ -112,6 +114,47 @@ function timing_safe_equal_hex(a, b) {
     out |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }
   return out === 0;
+}
+
+function read_positive_int_env(raw_value, fallback) {
+  if (typeof raw_value !== "string" || raw_value.trim().length === 0) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(raw_value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function daily_window_key(requested_by, now) {
+  const day = now.toISOString().slice(0, 10);
+  return `limit:daily:${requested_by}:${day}`;
+}
+
+function minute_window_key(requested_by, now) {
+  const minute = now.toISOString().slice(0, 16);
+  return `limit:minute:${requested_by}:${minute}`;
+}
+
+async function check_and_increment_sender_limits(env, requested_by) {
+  const now = new Date();
+  const daily_limit = read_positive_int_env(env.DAILY_TASK_LIMIT, DEFAULT_DAILY_TASK_LIMIT);
+  const per_minute_limit = read_positive_int_env(env.PER_MINUTE_TASK_LIMIT, DEFAULT_PER_MINUTE_TASK_LIMIT);
+
+  const daily_key = daily_window_key(requested_by, now);
+  const minute_key = minute_window_key(requested_by, now);
+
+  const daily_count_raw = await env.WHATSAPP_DEDUP.get(daily_key);
+  const minute_count_raw = await env.WHATSAPP_DEDUP.get(minute_key);
+
+  const daily_count = Number.parseInt(daily_count_raw ?? "0", 10) || 0;
+  const minute_count = Number.parseInt(minute_count_raw ?? "0", 10) || 0;
+
+  if (daily_count >= daily_limit) return "daily_task_limit_exceeded";
+  if (minute_count >= per_minute_limit) return "sender_rate_limit_exceeded";
+
+  await env.WHATSAPP_DEDUP.put(daily_key, `${daily_count + 1}`, { expirationTtl: 2 * ONE_DAY_SECONDS });
+  await env.WHATSAPP_DEDUP.put(minute_key, `${minute_count + 1}`, { expirationTtl: 2 * 60 });
+  return null;
 }
 
 async function is_duplicate_message(kv, message_id) {
@@ -305,6 +348,14 @@ export default {
     const duplicate = await is_duplicate_message(env.WHATSAPP_DEDUP, parsed.message_id);
     if (duplicate) {
       return json_response(200, { status: "duplicate_ignored", message_id: parsed.message_id });
+    }
+
+    const limit_error = await check_and_increment_sender_limits(env, parsed.requested_by);
+    if (limit_error) {
+      return json_response(429, {
+        error: limit_error,
+        requested_by: parsed.requested_by,
+      });
     }
 
     await insert_queued_task(env.TASKS_DB, parsed);

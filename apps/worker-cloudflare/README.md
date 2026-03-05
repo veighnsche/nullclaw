@@ -36,6 +36,11 @@ Required binding names:
 - `TASKS_DB` (D1)
 - `TASK_QUEUE` (Queue producer)
 
+Optional guardrail env vars:
+
+- `DAILY_TASK_LIMIT` (default `50`)
+- `PER_MINUTE_TASK_LIMIT` (default `10`)
+
 HTTP routes:
 
 - `POST /` inbound task ingest (queued insert + queue handoff)
