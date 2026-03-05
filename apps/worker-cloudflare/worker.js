@@ -11,6 +11,7 @@ const DEFAULT_PER_MINUTE_TASK_LIMIT = 10;
 const DEFAULT_MAX_PROMPT_BYTES = 4000;
 const DEFAULT_FAILURES_BEFORE_COOLDOWN = 3;
 const DEFAULT_FAILURE_COOLDOWN_SECONDS = 300;
+const DEFAULT_DAILY_COST_BUDGET_CENTS = 10000;
 
 function json_response(status, body) {
   return new Response(JSON.stringify(body), {
@@ -61,6 +62,13 @@ function parse_inbound_payload(payload) {
   }
 
   const message_id = typeof payload.message_id === "string" ? payload.message_id.trim() : "";
+  const estimated_cost_cents =
+    typeof payload.estimated_cost_cents === "number" && Number.isInteger(payload.estimated_cost_cents)
+      ? payload.estimated_cost_cents
+      : 0;
+  if (estimated_cost_cents < 0) {
+    throw new Error("invalid_estimated_cost_cents");
+  }
 
   return {
     task_id: typeof payload.task_id === "string" && payload.task_id.trim().length > 0 ? payload.task_id.trim() : crypto.randomUUID(),
@@ -71,6 +79,7 @@ function parse_inbound_payload(payload) {
     channel,
     risk_level,
     action_target,
+    estimated_cost_cents,
   };
 }
 
@@ -132,6 +141,27 @@ async function check_and_increment_sender_limits(env, requested_by) {
 
   await env.WHATSAPP_DEDUP.put(daily_key, `${daily_count + 1}`, { expirationTtl: 2 * ONE_DAY_SECONDS });
   await env.WHATSAPP_DEDUP.put(minute_key, `${minute_count + 1}`, { expirationTtl: 2 * 60 });
+  return null;
+}
+
+async function check_and_increment_sender_budget(env, requested_by, estimated_cost_cents) {
+  const daily_budget_limit = read_positive_int_env(
+    env.DAILY_COST_BUDGET_CENTS,
+    DEFAULT_DAILY_COST_BUDGET_CENTS,
+  );
+  const budget_key = `budget:daily_cost:${requested_by}:${new Date().toISOString().slice(0, 10)}`;
+  const current_budget_raw = await env.WHATSAPP_DEDUP.get(budget_key);
+  const current_budget = Number.parseInt(current_budget_raw ?? "0", 10) || 0;
+
+  if (current_budget + estimated_cost_cents > daily_budget_limit) {
+    return "daily_budget_exceeded";
+  }
+
+  await env.WHATSAPP_DEDUP.put(
+    budget_key,
+    `${current_budget + estimated_cost_cents}`,
+    { expirationTtl: 2 * ONE_DAY_SECONDS },
+  );
   return null;
 }
 
@@ -376,6 +406,18 @@ export default {
     if (limit_error) {
       return json_response(429, {
         error: limit_error,
+        requested_by: parsed.requested_by,
+      });
+    }
+
+    const budget_error = await check_and_increment_sender_budget(
+      env,
+      parsed.requested_by,
+      parsed.estimated_cost_cents,
+    );
+    if (budget_error) {
+      return json_response(429, {
+        error: budget_error,
         requested_by: parsed.requested_by,
       });
     }

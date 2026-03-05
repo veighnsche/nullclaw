@@ -117,3 +117,41 @@ test("worker applies sender cooldown after repeated terminal failures", async ()
   assert.equal(blocked_body.error, "sender_cooldown_active");
   assert.equal(env.TASK_QUEUE.messages.length, 1);
 });
+
+test("worker enforces daily sender budget cap", async () => {
+  const secret = "guardrails-secret";
+  const env = {
+    WHATSAPP_WEBHOOK_SECRET: secret,
+    DAILY_COST_BUDGET_CENTS: "10",
+    WHATSAPP_DEDUP: new MockKVNamespace(),
+    TASKS_DB: new MockD1Database(),
+    TASK_QUEUE: new MockQueue(),
+  };
+
+  const payload_a = {
+    task_id: "task-budget-1",
+    message_id: "msg-budget-1",
+    workflow: "echo_summary",
+    prompt: "hello",
+    requested_by: "rodger",
+    channel: "whatsapp",
+    risk_level: "low",
+    action_target: "local",
+    estimated_cost_cents: 6,
+  };
+  const payload_b = {
+    ...payload_a,
+    task_id: "task-budget-2",
+    message_id: "msg-budget-2",
+    estimated_cost_cents: 5,
+  };
+
+  const first = await worker.fetch(await signed_request("/", payload_a, secret), env);
+  assert.equal(first.status, 200);
+
+  const second = await worker.fetch(await signed_request("/", payload_b, secret), env);
+  assert.equal(second.status, 429);
+  const body = await second.json();
+  assert.equal(body.error, "daily_budget_exceeded");
+  assert.equal(env.TASK_QUEUE.messages.length, 1);
+});

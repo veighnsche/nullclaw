@@ -43,6 +43,7 @@ Optional guardrail env vars:
 - `MAX_PROMPT_BYTES` (default `4000`)
 - `FAILURES_BEFORE_COOLDOWN` (default `3`)
 - `FAILURE_COOLDOWN_SECONDS` (default `300`)
+- `DAILY_COST_BUDGET_CENTS` (default `10000`)
 
 HTTP routes:
 
