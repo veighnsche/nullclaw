@@ -7,6 +7,8 @@ const VALID_ACTION_TARGETS = new Set(["local", "external_account", "public_publi
 const DEFAULT_DAILY_TASK_LIMIT = 50;
 const DEFAULT_PER_MINUTE_TASK_LIMIT = 10;
 const DEFAULT_MAX_PROMPT_BYTES = 4000;
+const DEFAULT_FAILURES_BEFORE_COOLDOWN = 3;
+const DEFAULT_FAILURE_COOLDOWN_SECONDS = 300;
 
 function json_response(status, body) {
   return new Response(JSON.stringify(body), {
@@ -161,6 +163,29 @@ async function check_and_increment_sender_limits(env, requested_by) {
 function exceeds_prompt_size_limit(prompt, env) {
   const max_prompt_bytes = read_positive_int_env(env.MAX_PROMPT_BYTES, DEFAULT_MAX_PROMPT_BYTES);
   return new TextEncoder().encode(prompt).length > max_prompt_bytes;
+}
+
+async function is_sender_in_cooldown(env, requested_by) {
+  const value = await env.WHATSAPP_DEDUP.get(`cooldown:${requested_by}`);
+  return value !== null;
+}
+
+async function maybe_apply_failure_cooldown(env, terminal) {
+  if (terminal.terminal_status !== TERMINAL_STATUS_FAILED) return;
+
+  const failure_threshold = read_positive_int_env(env.FAILURES_BEFORE_COOLDOWN, DEFAULT_FAILURES_BEFORE_COOLDOWN);
+  const cooldown_seconds = read_positive_int_env(env.FAILURE_COOLDOWN_SECONDS, DEFAULT_FAILURE_COOLDOWN_SECONDS);
+  const failure_key = `failures:recent:${terminal.requested_by}`;
+  const cooldown_key = `cooldown:${terminal.requested_by}`;
+
+  const current_failures_raw = await env.WHATSAPP_DEDUP.get(failure_key);
+  const current_failures = Number.parseInt(current_failures_raw ?? "0", 10) || 0;
+  const next_failures = current_failures + 1;
+
+  await env.WHATSAPP_DEDUP.put(failure_key, `${next_failures}`, { expirationTtl: 60 * 60 });
+  if (next_failures >= failure_threshold) {
+    await env.WHATSAPP_DEDUP.put(cooldown_key, "1", { expirationTtl: cooldown_seconds });
+  }
 }
 
 async function is_duplicate_message(kv, message_id) {
@@ -334,6 +359,7 @@ export default {
       }
 
       const message_text = format_terminal_message(terminal.terminal_status, terminal.summary);
+      await maybe_apply_failure_cooldown(env, terminal);
       return json_response(200, {
         status: "terminal_recorded",
         task_id: terminal.task_id,
@@ -354,6 +380,13 @@ export default {
     const duplicate = await is_duplicate_message(env.WHATSAPP_DEDUP, parsed.message_id);
     if (duplicate) {
       return json_response(200, { status: "duplicate_ignored", message_id: parsed.message_id });
+    }
+
+    if (await is_sender_in_cooldown(env, parsed.requested_by)) {
+      return json_response(429, {
+        error: "sender_cooldown_active",
+        requested_by: parsed.requested_by,
+      });
     }
 
     if (exceeds_prompt_size_limit(parsed.prompt, env)) {

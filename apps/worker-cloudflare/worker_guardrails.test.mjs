@@ -57,6 +57,28 @@ class MockD1Statement {
       });
       return { success: true, meta: { changes: 1 } };
     }
+    if (normalized.startsWith("update tasks set status = ?1")) {
+      const [status, now, task_id] = this.args;
+      const row = this.db.tasks.get(task_id);
+      if (!row) return { success: true, meta: { changes: 0 } };
+      if (!new Set(["queued", "running", "waiting_approval"]).has(row.status)) {
+        return { success: true, meta: { changes: 0 } };
+      }
+      row.status = status;
+      row.updated_at = now;
+      row.version += 1;
+      return { success: true, meta: { changes: 1 } };
+    }
+    if (normalized.startsWith("insert into task_events")) {
+      const [task_id, event_payload_json, created_at] = this.args;
+      this.db.task_events.push({
+        task_id,
+        event_type: "terminal_update",
+        event_payload_json,
+        created_at,
+      });
+      return { success: true, meta: { changes: 1 } };
+    }
     throw new Error(`unsupported_sql:${normalized}`);
   }
 }
@@ -64,6 +86,7 @@ class MockD1Statement {
 class MockD1Database {
   constructor() {
     this.tasks = new Map();
+    this.task_events = [];
   }
 
   prepare(sql) {
@@ -89,10 +112,10 @@ async function compute_hmac_sha256_hex(secret, message) {
   return hex;
 }
 
-async function signed_request(payload, secret) {
+async function signed_request(payload, secret, pathname = "/") {
   const body = JSON.stringify(payload);
   const signature = await compute_hmac_sha256_hex(secret, body);
-  return new Request("https://example.test/", {
+  return new Request(`https://example.test${pathname}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -166,4 +189,53 @@ test("worker rejects oversized prompt before queue handoff", async () => {
   assert.equal(body.error, "prompt_too_large");
   assert.equal(body.max_prompt_bytes, 8);
   assert.equal(env.TASK_QUEUE.messages.length, 0);
+});
+
+test("worker applies sender cooldown after repeated terminal failures", async () => {
+  const secret = "guardrails-secret";
+  const env = {
+    WHATSAPP_WEBHOOK_SECRET: secret,
+    FAILURES_BEFORE_COOLDOWN: "1",
+    FAILURE_COOLDOWN_SECONDS: "600",
+    WHATSAPP_DEDUP: new MockKVNamespace(),
+    TASKS_DB: new MockD1Database(),
+    TASK_QUEUE: new MockQueue(),
+  };
+
+  const ingest_payload = {
+    task_id: "task-cooldown-1",
+    message_id: "msg-cooldown-1",
+    workflow: "echo_summary",
+    prompt: "hello",
+    requested_by: "rodger",
+    channel: "whatsapp",
+    risk_level: "low",
+    action_target: "local",
+  };
+
+  const ingest_response = await worker.fetch(await signed_request(ingest_payload, secret), env);
+  assert.equal(ingest_response.status, 200);
+
+  const terminal_payload = {
+    task_id: "task-cooldown-1",
+    requested_by: "rodger",
+    terminal_status: "failed",
+    summary: "provider timeout",
+  };
+  const terminal_response = await worker.fetch(
+    await signed_request(terminal_payload, secret, "/terminal"),
+    env,
+  );
+  assert.equal(terminal_response.status, 200);
+
+  const second_ingest = {
+    ...ingest_payload,
+    task_id: "task-cooldown-2",
+    message_id: "msg-cooldown-2",
+  };
+  const blocked_response = await worker.fetch(await signed_request(second_ingest, secret), env);
+  assert.equal(blocked_response.status, 429);
+  const blocked_body = await blocked_response.json();
+  assert.equal(blocked_body.error, "sender_cooldown_active");
+  assert.equal(env.TASK_QUEUE.messages.length, 1);
 });
