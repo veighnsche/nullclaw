@@ -355,7 +355,7 @@ Status (March 5, 2026):
 - [x] max retries per workflow (attempt gate in executor)
 - [x] rate limits by sender
 - [x] cooldown for repeated failures
-- [ ] per-task max model tokens is pending (current proxy: ingress prompt byte limit)
+- [x] per-task max model tokens (ingress token estimate gate)
 
 Acceptance:
 
