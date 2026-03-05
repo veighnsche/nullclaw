@@ -55,6 +55,20 @@ Build a hybrid architecture where:
 
 Policy helper exists in `src/edge/contracts.zig` and should be used as the single policy primitive.
 
+### 3.3 Language Boundary (Zig-first)
+
+- Canonical business logic lives in Zig (`src/edge/**`, `apps/executor/**`):
+  - policy decisions
+  - task status transitions
+  - approval command parsing
+  - queue/task contract shaping
+- `apps/worker-cloudflare` is a thin edge adapter only:
+  - webhook transport
+  - signature verification
+  - KV dedup
+  - D1/Queue binding
+- Keep TypeScript surface minimal and avoid duplicating core policy/state logic there.
+
 ## 4) Delivery Plan (step by step)
 
 ## Step 0 - Freeze scope and acceptance criteria
@@ -149,18 +163,16 @@ Acceptance:
 - can append events
 - can transition state with optimistic update
 
-## Step 4 - Worker: ingest -> classify -> persist -> enqueue
+## Step 4 - Worker adapter (thin): ingest -> persist -> enqueue
 
 Implement in `apps/worker-cloudflare`:
 
 1. parse inbound channel payload
 2. verify signature
 3. dedup id
-4. build `TaskEnvelope`
-5. compute `approval_mode_for(...)`
-6. write task row in D1
-7. enqueue task JSON to Queue
-8. send quick ack to channel
+4. write queued task row in D1
+5. enqueue task JSON to Queue
+6. send quick ack to channel
 
 Ack style:
 
@@ -179,6 +191,7 @@ Implement in `apps/executor`:
 - queue consumer entrypoint
 - task fetch from D1 by id
 - state transition `queued -> running`
+- apply policy/state helpers from `src/edge/**`
 - execute one simple built-in workflow
 - write terminal state + summary
 
@@ -394,12 +407,12 @@ Acceptance:
 ## 5) Immediate Next 7 Tasks
 
 1. Add D1 schema migration for task ledger.
-2. Bind Queue + D1 in `apps/worker-cloudflare`.
-3. Implement `queued` task insert and enqueue.
-4. Scaffold `apps/executor` queue consumer.
-5. Implement one test workflow: `echo_summary`.
-6. Implement terminal notifier back to WhatsApp.
-7. Add approval command parsing and state transition.
+2. Bind Queue + D1 in `apps/worker-cloudflare` (thin adapter only).
+3. Implement `queued` task insert + enqueue in worker adapter.
+4. Scaffold Zig queue consumer in `apps/executor` and wire `src/edge` helpers.
+5. Implement one Zig test workflow: `echo_summary`.
+6. Implement terminal notifier path with Zig-first logic and thin channel adapter.
+7. Implement approval command parsing + state transition in `src/edge` (Zig).
 
 ## 6) Definition of Done for v1
 
