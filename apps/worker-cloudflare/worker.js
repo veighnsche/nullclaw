@@ -2,6 +2,8 @@ const ONE_DAY_SECONDS = 24 * 60 * 60;
 const QUEUED_STATUS = "queued";
 const TERMINAL_STATUS_SUCCEEDED = "succeeded";
 const TERMINAL_STATUS_FAILED = "failed";
+const VALID_RISK_LEVELS = new Set(["low", "medium", "high"]);
+const VALID_ACTION_TARGETS = new Set(["local", "external_account", "public_publish", "money"]);
 
 function json_response(status, body) {
   return new Response(JSON.stringify(body), {
@@ -39,11 +41,17 @@ function parse_inbound_payload(payload) {
     typeof payload.risk_level === "string" && payload.risk_level.trim().length > 0
       ? payload.risk_level.trim()
       : "low";
+  if (!VALID_RISK_LEVELS.has(risk_level)) {
+    throw new Error("invalid_risk_level");
+  }
 
   const action_target =
     typeof payload.action_target === "string" && payload.action_target.trim().length > 0
       ? payload.action_target.trim()
       : "local";
+  if (!VALID_ACTION_TARGETS.has(action_target)) {
+    throw new Error("invalid_action_target");
+  }
 
   const message_id = typeof payload.message_id === "string" ? payload.message_id.trim() : "";
 
@@ -72,19 +80,34 @@ async function verify_signature(request, env) {
   return provided === env.WHATSAPP_WEBHOOK_SECRET;
 }
 
-async function remember_message_id(kv, message_id) {
+async function is_duplicate_message(kv, message_id) {
   if (!message_id) {
     return false;
   }
 
   const key = `message:${message_id}`;
   const existing = await kv.get(key);
-  if (existing !== null) {
-    return true;
-  }
+  return existing !== null;
+}
 
+async function mark_message_id_processed(kv, message_id) {
+  if (!message_id) {
+    return;
+  }
+  const key = `message:${message_id}`;
   await kv.put(key, "1", { expirationTtl: ONE_DAY_SECONDS });
-  return false;
+}
+
+async function mark_enqueue_failure(db, task_id, failure_reason) {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `UPDATE tasks
+       SET status = 'failed', updated_at = ?1, last_error = ?2, version = version + 1
+       WHERE id = ?3`,
+    )
+    .bind(now, failure_reason, task_id)
+    .run();
 }
 
 async function insert_queued_task(db, task) {
@@ -232,13 +255,23 @@ export default {
       });
     }
 
-    const duplicate = await remember_message_id(env.WHATSAPP_DEDUP, parsed.message_id);
+    const duplicate = await is_duplicate_message(env.WHATSAPP_DEDUP, parsed.message_id);
     if (duplicate) {
       return json_response(200, { status: "duplicate_ignored", message_id: parsed.message_id });
     }
 
     await insert_queued_task(env.TASKS_DB, parsed);
-    await enqueue_task(env.TASK_QUEUE, parsed);
+    try {
+      await enqueue_task(env.TASK_QUEUE, parsed);
+    } catch (_error) {
+      await mark_enqueue_failure(env.TASKS_DB, parsed.task_id, "queue_enqueue_failed");
+      return json_response(500, {
+        error: "queue_enqueue_failed",
+        task_id: parsed.task_id,
+      });
+    }
+
+    await mark_message_id_processed(env.WHATSAPP_DEDUP, parsed.message_id);
 
     return json_response(200, {
       status: "queued",
