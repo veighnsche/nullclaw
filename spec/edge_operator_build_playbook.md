@@ -406,13 +406,26 @@ Acceptance:
 
 ## 5) Immediate Next 7 Tasks
 
-1. Add D1 schema migration for task ledger.
-2. Bind Queue + D1 in `apps/worker-cloudflare` (thin adapter only).
-3. Implement `queued` task insert + enqueue in worker adapter.
-4. Scaffold Zig queue consumer in `apps/executor` and wire `src/edge` helpers.
-5. Implement one Zig test workflow: `echo_summary`.
-6. Implement terminal notifier path with Zig-first logic and thin channel adapter.
-7. Implement approval command parsing + state transition in `src/edge` (Zig).
+Status update (March 5, 2026):
+
+1. [x] Add D1 schema migration for task ledger.
+2. [x] Bind Queue + D1 in `apps/worker-cloudflare` (thin adapter only).
+3. [x] Implement `queued` task insert + enqueue in worker adapter.
+4. [x] Scaffold Zig queue consumer in `apps/executor` and wire `src/edge` helpers.
+5. [x] Implement one Zig test workflow: `echo_summary`.
+6. [x] Implement terminal notifier path with Zig-first logic and thin channel adapter.
+7. [x] Implement approval command parsing + state transition in `src/edge` (Zig).
+
+Rodger rollout status:
+
+- friend canary (Rodger): not started yet
+
+Next big milestone (remaining from v1 scope):
+
+- Ship a deterministic end-to-end validation path for Step 0:
+  - webhook ingest -> D1 queued row -> queue handoff -> executor run -> terminal callback
+  - include integration tests for worker routes (`/` and `/terminal`) with no real network
+  - add strict signature verification and optimistic status transition checks in callback path
 
 ## 6) Definition of Done for v1
 
