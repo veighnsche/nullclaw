@@ -6,10 +6,9 @@ cd "$ROOT_DIR"
 
 mkdir -p examples/edge/cloudflare-worker/dist
 
-zig build-exe examples/edge/cloudflare-worker/agent_core.zig \
+zig build-obj examples/edge/cloudflare-worker/agent_core.zig \
   -target wasm32-freestanding \
   -fno-entry \
-  -rdynamic \
   -O ReleaseSmall \
   -femit-bin=examples/edge/cloudflare-worker/dist/agent_core.wasm
 

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nullclaw.edge.task_envelope",
+  "title": "TaskEnvelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "workflow",
+    "created_at_unix",
+    "requested_by",
+    "channel",
+    "prompt",
+    "risk_level",
+    "action_target"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workflow": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at_unix": {
+      "type": "integer"
+    },
+    "requested_by": {
+      "type": "string",
+      "minLength": 1
+    },
+    "channel": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "action_target": {
+      "type": "string",
+      "enum": [
+        "local",
+        "external_account",
+        "public_publish",
+        "money"
+      ]
+    },
+    "metadata_json": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

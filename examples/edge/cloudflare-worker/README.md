@@ -1,77 +1,95 @@
-# Edge MVP: Telegram + OpenAI + WASM policy core (Cloudflare Worker)
+# Edge MVP: WhatsApp + OpenAI + Gemini + WASM policy core (Cloudflare Worker)
 
-This example demonstrates the **hybrid edge path**:
+This example demonstrates a **hybrid edge path**:
 
-- Edge host (`worker.mjs`) handles HTTP, secrets, Telegram webhook, OpenAI call.
+- Edge host (`worker.mjs`) handles HTTP, secrets, WhatsApp webhook verification, OpenAI/Gemini API calls.
 - Tiny Zig WASM module (`agent_core.zig`) decides response policy.
 
-This keeps secrets and network in the host while agent logic stays swappable as WASM.
+This keeps networking/secrets in the Worker host while policy logic remains swappable as WASM.
 
 ## What it does
 
-1. Receives Telegram webhook update.
-2. Extracts simple text features in JS.
-3. Calls WASM `choose_policy(...)`.
-4. Builds a system prompt from selected policy.
-5. Sends request to OpenAI Chat Completions.
-6. Sends the reply back to Telegram chat.
+1. Receives WhatsApp webhook events.
+2. Verifies Meta webhook handshake (`GET`) and optional payload signature (`POST`) when `WHATSAPP_APP_SECRET` is set.
+3. Deduplicates inbound message IDs using Cloudflare KV (optional).
+4. Calls WASM `choose_policy(...)`.
+5. Builds system prompt from selected policy.
+6. Calls LLM providers in order: primary then fallback.
+7. Sends reply back via WhatsApp Cloud API.
+
+## Provider model routing
+
+Configured via `wrangler.toml` vars:
+
+- `PRIMARY_PROVIDER` = `codex` or `gemini` (strict)
+- `FALLBACK_PROVIDER` = `codex` or `gemini` (strict)
+- Codex model default: `gpt-5-nano`
+- Gemini model default: `gemini-3.1-pro`
+
+Current default config:
+
+- primary: Codex (`gpt-5-nano`)
+- fallback: Gemini (`gemini-3.1-pro`, fallback model `gemini-2.5-pro`)
 
 ## Prerequisites
 
 - Cloudflare account + [`wrangler`](https://developers.cloudflare.com/workers/wrangler/)
 - Zig `0.15.2`
-- Telegram bot token
+- Meta WhatsApp Cloud API app configured
 - OpenAI API key
+- Gemini API key
 
-## Build WASM core
+## Build WASM policy core
 
 From repository root:
 
 ```bash
 mkdir -p examples/edge/cloudflare-worker/dist
-zig build-exe examples/edge/cloudflare-worker/agent_core.zig \
+zig build-obj examples/edge/cloudflare-worker/agent_core.zig \
   -target wasm32-freestanding \
   -fno-entry \
-  -rdynamic \
   -O ReleaseSmall \
   -femit-bin=examples/edge/cloudflare-worker/dist/agent_core.wasm
 ```
 
-## Configure secrets
+## Configure Worker secrets
 
 ```bash
 cd examples/edge/cloudflare-worker
-wrangler secret put TELEGRAM_BOT_TOKEN
+
+# WhatsApp
+wrangler secret put WHATSAPP_VERIFY_TOKEN
+wrangler secret put WHATSAPP_ACCESS_TOKEN
+wrangler secret put WHATSAPP_PHONE_NUMBER_ID
+wrangler secret put WHATSAPP_APP_SECRET
+
+# LLM providers
 wrangler secret put OPENAI_API_KEY
-wrangler secret put TELEGRAM_WEBHOOK_SECRET
+wrangler secret put GEMINI_API_KEY
 ```
 
-## Enable Telegram dedup (KV)
+Notes:
+
+- `WHATSAPP_APP_SECRET` is optional but strongly recommended. If set, POST signature verification is enforced.
+
+## Enable dedup KV (recommended)
 
 Create KV namespaces:
 
 ```bash
 cd examples/edge/cloudflare-worker
-wrangler kv namespace create TELEGRAM_DEDUP
-wrangler kv namespace create TELEGRAM_DEDUP --preview
+wrangler kv namespace create WHATSAPP_DEDUP
+wrangler kv namespace create WHATSAPP_DEDUP --preview
 ```
 
-Then add this binding block to `wrangler.toml` with your IDs:
+Then add this to `wrangler.toml` (replace IDs):
 
 ```toml
 [[kv_namespaces]]
-binding = "TELEGRAM_DEDUP"
+binding = "WHATSAPP_DEDUP"
 id = "<your_prod_namespace_id>"
 preview_id = "<your_preview_namespace_id>"
 ```
-
-Worker deduplicates by `update_id` and skips retries already seen in KV.
-
-Optional variables in `wrangler.toml`:
-
-- `OPENAI_MODEL` (default `gpt-4o-mini`)
-- `DEDUP_TTL_SECONDS` (default `86400`)
-- `PUBLIC_BASE_URL` (required only for `/telegram/set-webhook` helper route)
 
 ## Deploy
 
@@ -80,29 +98,36 @@ cd examples/edge/cloudflare-worker
 wrangler deploy
 ```
 
-## Set Telegram webhook
+## Configure WhatsApp webhook in Meta
 
-Option A: helper endpoint (after setting `PUBLIC_BASE_URL` var)
+In Meta App Dashboard (WhatsApp product):
+
+- Callback URL: `https://<your-worker-domain>/whatsapp/webhook`
+- Verify token: exactly `WHATSAPP_VERIFY_TOKEN`
+
+Meta performs GET verification using `hub.mode`, `hub.verify_token`, `hub.challenge`.
+
+## Health check
 
 ```bash
-curl -X POST "https://<your-worker-domain>/telegram/set-webhook"
+curl "https://<your-worker-domain>/health"
 ```
 
-Option B: set manually
+Returns selected provider order and active model defaults.
 
-```bash
-curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
-  -H "content-type: application/json" \
-  -d '{
-    "url": "https://<your-worker-domain>/telegram/webhook",
-    "secret_token": "<TELEGRAM_WEBHOOK_SECRET>",
-    "allowed_updates": ["message", "edited_message"]
-  }'
-```
+## Worker vars in `wrangler.toml`
+
+- `PRIMARY_PROVIDER`
+- `FALLBACK_PROVIDER`
+- `CODEX_MODEL`
+- `GEMINI_MODEL`
+- `GEMINI_FALLBACK_MODEL`
+- `LLM_TEMPERATURE`
+- `DEDUP_TTL_SECONDS`
 
 ## Notes
 
-- This is intentionally minimal and stateless.
-- Dedup with KV is best-effort (eventual consistency), but removes the common Telegram retry duplicates.
-- For production, still add retries for outbound calls and rate limiting.
-- To evolve behavior, update only `agent_core.zig` and redeploy the wasm artifact.
+- This example is intentionally stateless and minimal.
+- The Worker implementation uses OpenAI API + Gemini API directly.
+- This is not nullclaw's OAuth `openai-codex` provider flow.
+- To evolve response behavior, update `agent_core.zig` and redeploy `dist/agent_core.wasm`.
