@@ -13,3 +13,6 @@ Current scope:
 - task envelope and result contracts
 - risk and approval primitives
 - terminal status helpers
+- queued-task ledger validation and status transition guards
+- queue handoff message shaping
+- approval command parsing and state transitions
