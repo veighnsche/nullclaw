@@ -56,3 +56,9 @@ This validates:
 - ingest webhook -> D1 queued row -> queue handoff
 - Zig executor workflow run (`echo_summary`) via local driver
 - terminal callback -> D1 terminal state/event update
+
+Deterministic regression test:
+
+```bash
+node --test apps/worker-cloudflare/step0_validation.test.mjs
+```

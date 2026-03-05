@@ -167,7 +167,7 @@ function run_executor_driver(repo_root, queue_message) {
   return JSON.parse(output);
 }
 
-async function main() {
+export async function run_step0_validation() {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const repo_root = path.resolve(here, "../..");
 
@@ -242,17 +242,27 @@ async function main() {
   const second_terminal_body = await second_terminal_response.json();
   assert.equal(second_terminal_body.error, "invalid_terminal_transition");
 
-  console.log("step0 validation passed");
-  console.log(JSON.stringify({
+  return {
     task_id: final_row.id,
     final_status: final_row.status,
     queue_messages: env.TASK_QUEUE.messages.length,
     task_events: env.TASKS_DB.task_events.length,
-  }));
+    second_terminal_status: second_terminal_response.status,
+  };
 }
 
-main().catch((error) => {
-  console.error("step0 validation failed");
-  console.error(error instanceof Error ? error.stack : String(error));
-  process.exitCode = 1;
-});
+const is_main_module =
+  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (is_main_module) {
+  run_step0_validation()
+    .then((summary) => {
+      console.log("step0 validation passed");
+      console.log(JSON.stringify(summary));
+    })
+    .catch((error) => {
+      console.error("step0 validation failed");
+      console.error(error instanceof Error ? error.stack : String(error));
+      process.exitCode = 1;
+    });
+}
