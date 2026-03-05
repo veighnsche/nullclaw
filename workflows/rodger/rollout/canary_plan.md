@@ -1,12 +1,13 @@
-# rodger canary plan
+# rodger canary checklist
 
-Status: active checklist (March 5, 2026)
+Status: execution checklist (March 5, 2026)
 
-Stages:
-1. Internal canary.
-2. Friend canary (Rodger).
-3. Limited production users.
-4. Full release with feature flags.
+This file is the Rodger rollout source of truth.
+
+Rules:
+- execute in PR order
+- do not start a later PR until the current PR acceptance criteria are green
+- keep external side effects disabled until the Rodger canary is stable
 
 Track:
 - queue lag
@@ -15,45 +16,220 @@ Track:
 - error classes by workflow
 - cost per successful task
 
-## Readiness checklist
+## Current repo status
 
-- [x] D1 ledger migration exists.
-- [x] Queue + D1 + KV binding scaffolds exist.
-- [x] Deterministic Step 0 validation path is runnable locally.
-- [x] Approval command parser exists in Zig edge contracts.
-- [ ] Worker adapter is deployed with production bindings.
-- [ ] Executor service is deployed and reachable from edge callback path.
-- [ ] Real provider signature secret is configured.
+Done in code:
+- [x] D1 task ledger migration exists.
+- [x] Worker scaffold exists for Queue + D1 + KV bindings.
+- [x] Worker inserts queued tasks and appends terminal events.
+- [x] Zig edge helpers exist for approval parsing, queue validation, and task status transitions.
+- [x] `echo_summary` exists as the one implemented low-risk workflow.
+- [x] Step 0 validation has been re-verified on Zig `0.15.2`.
+- [x] Guardrails exist for signature verification, rate limits, budget caps, prompt size, token estimate limits, and failure cooldowns.
 
-## Stage gates
+Partial or blocked:
+- [ ] Executor consume logic exists, but the executor service entrypoint is still a stub.
+- [ ] `social_draft_and_approve` exists only as a scaffolded success path; it does not yet drive a real `waiting_approval` lifecycle.
+- [ ] The workflow contract is only partially implemented; current workflow dispatch is still mostly `workflow + prompt -> terminal summary`.
 
-### 1) Internal canary
+Not started:
+- [ ] Worker is not deployed with real production bindings.
+- [ ] Executor is not deployed and reachable from the edge callback path.
+- [ ] Real webhook signature secret is not configured.
+- [ ] Rodger-only friend canary has not started.
+- [ ] `keynote_pdf_pack`, `reservation_call_assistant`, and `music_generate_and_release` remain explicit scaffolds only.
 
-- Run `node --test apps/worker-cloudflare/step0_validation.test.mjs`.
-- Manually execute one end-to-end low-risk `echo_summary` task.
-- Confirm terminal callback updates exactly one task row and one task event.
+## PR sequence
+
+### PR 1 - restore deterministic Step 0 verification
+
+Goal:
+- make the local no-network Step 0 path trustworthy again
+
+Target files:
+- `apps/worker-cloudflare/step0_validation.mjs`
+- `apps/worker-cloudflare/step0_validation.test.mjs`
+- `apps/executor/src/step0_validation_driver.zig`
+- `apps/worker-cloudflare/README.md`
+
+Checklist:
+- [x] make `node --test apps/worker-cloudflare/step0_validation.test.mjs` pass on the expected dev machine
+- [x] fail clearly when `zig` is unavailable, instead of surfacing `executor_driver_failed: undefined`
+- [x] confirm the validation still covers: queued row, queue handoff, executor run, terminal callback, one terminal event, duplicate terminal rejection
+- [x] document the exact local prerequisites for running Step 0
+
+Acceptance:
+- `node --test apps/worker-cloudflare/step0_validation.test.mjs`
+- no network access required
+
+Current status:
+- the missing-Zig failure mode is fixed and covered by a Node test
+- the success-path acceptance has been re-verified on Zig `0.15.2`
+
+### PR 2 - turn executor scaffold into a real service
+
+Goal:
+- replace the stub executor entrypoint with a service that can consume queue work and send terminal callbacks
+
+Target files:
+- `apps/executor/src/main.zig`
+- `apps/executor/src/queue_consumer.zig`
+- `apps/executor/src/task_runner.zig`
+- `apps/executor/src/notify/whatsapp_terminal_notifier.zig`
+- `apps/executor/README.md`
+
+Checklist:
+- [ ] replace the stub `main()` with real startup logic
+- [ ] wire queue payload -> consume_once -> terminal callback request
+- [ ] move task lifecycle through `queued -> running -> terminal`
+- [ ] keep retry and attempt limits enforced in the executor path
+- [ ] add tests for service startup failure paths and terminal payload formatting
+
+Acceptance:
+- executor can be started locally as a process
+- local run can consume one `echo_summary` queue payload and produce a valid terminal callback payload
+
+### PR 3 - deploy the thin edge and executor plumbing
+
+Goal:
+- deploy the worker and executor with real bindings and a reachable callback path
+
+Target files:
+- `apps/worker-cloudflare/wrangler.toml`
+- `apps/worker-cloudflare/README.md`
+- `apps/executor/README.md`
+- deployment manifests or runbooks added by this PR
+
+Checklist:
+- [ ] provision real Cloudflare KV, D1, and Queue resources
+- [ ] replace placeholder binding IDs in `wrangler.toml`
+- [ ] deploy the Cloudflare Worker with production bindings
+- [ ] deploy the executor to its first real host
+- [ ] configure the worker-to-executor callback path
+- [ ] configure the real signature secret in the deployment environment
+- [ ] manually execute one end-to-end low-risk `echo_summary` task
+
+Acceptance:
+- one manual end-to-end `echo_summary` task succeeds
+- terminal callback updates exactly one task row and one task event
+
+### PR 4 - implement a real approval lifecycle for `social_draft_and_approve`
+
+Goal:
+- make approval-required work pause in `waiting_approval` instead of returning immediate terminal success
+
+Target files:
+- `apps/executor/src/workflows/social_draft_and_approve.zig`
+- `apps/executor/src/workflows/root.zig`
+- `src/edge/contracts.zig`
+- `src/edge/approval_command.zig`
+- any worker/executor files needed for approval-state persistence
+
+Checklist:
+- [ ] return `waiting_approval` for draft creation instead of terminal `succeeded`
+- [ ] persist draft summary and approval state in the ledger/event flow
+- [ ] route approve, reject, and revise through the Zig approval parser
+- [ ] keep external publish side effects disabled
+- [ ] add deterministic tests for `waiting_approval -> queued`, `waiting_approval -> canceled`, and revise flow
+
+Acceptance:
+- a social draft task can pause, accept an approval command, and resume without external publish side effects
+
+### PR 5 - internal canary
+
+Goal:
+- prove the low-risk path is stable before Rodger sees it
+
+Checklist:
+- [ ] run `node --test apps/worker-cloudflare/step0_validation.test.mjs`
+- [ ] run worker guardrail tests
+- [ ] manually execute one end-to-end low-risk `echo_summary` task
+- [ ] run 20 low-risk `echo_summary` tasks
+- [ ] verify 0 duplicate terminal sends
+- [ ] verify 0 secret leaks in logs
 
 Exit criteria:
 - 20/20 successful low-risk tasks
 - 0 duplicate terminal sends
 - 0 secret leaks in logs
 
-### 2) Friend canary (Rodger)
+### PR 6 - friend canary (Rodger only)
 
-- Enable Rodger allowlist identity only.
-- Allow `echo_summary` and `social_draft_and_approve` scaffold path only.
-- Keep external side effects disabled for scaffolded workflows.
+Goal:
+- expose the system to exactly one real user with tight scope
+
+Checklist:
+- [ ] enable Rodger allowlist identity only
+- [ ] allow only `echo_summary` and `social_draft_and_approve`
+- [ ] keep external side effects disabled for scaffolded workflows
+- [ ] track approval latency, terminal latency, error classes, and stuck tasks for 3 consecutive days
 
 Exit criteria:
 - 3 consecutive days with no stuck tasks
-- approval/terminal latency within expected budget
+- approval and terminal latency within expected budget
 
-### 3) Limited production users
+### PR 7 - security hardening follow-up
 
-- Expand allowlist gradually.
-- Keep high-risk workflows behind explicit approval gates.
+Goal:
+- finish the remaining security work before wider rollout
 
-### 4) Full release with feature flags
+Checklist:
+- [ ] add outbound domain allowlists for downstream integrations
+- [ ] add secret-redaction coverage for logs and task events
+- [ ] run a secret scan over worker, executor, and rollout config
+- [ ] verify callback signing and secret scope are explicit and documented
 
-- Enable per-workflow feature flags.
-- Keep rollback path for each workflow independently.
+Acceptance:
+- malformed queue messages are rejected safely
+- secret scan passes
+- redaction tests pass
+
+### PR 8 - limited production users
+
+Goal:
+- expand beyond Rodger slowly, without broadening risk too early
+
+Checklist:
+- [ ] expand allowlist gradually
+- [ ] keep high-risk workflows behind explicit approval gates
+- [ ] confirm rollback path still works per deployment
+
+Acceptance:
+- queue lag and task success rate remain within target after each allowlist expansion
+
+### PR 9 - full release controls
+
+Goal:
+- make rollout reversible by workflow
+
+Checklist:
+- [ ] enable per-workflow feature flags
+- [ ] keep rollback path for each workflow independently
+- [ ] verify feature-flag defaults are fail-closed
+
+Acceptance:
+- each workflow can be disabled independently without disabling the entire edge path
+
+### PR 10 - heavy workflow implementation after Rodger canary
+
+Goal:
+- implement the remaining Rodger workflows only after the low-risk path is stable
+
+Checklist:
+- [ ] implement `keynote_pdf_pack`
+- [ ] implement `reservation_call_assistant`
+- [ ] implement `music_generate_and_release`
+- [ ] keep explicit approval gates for any external account writes, public publish, calling, or money movement
+
+Acceptance:
+- each workflow has deterministic state transitions
+- each workflow has bounded retries
+- each workflow has a clear terminal summary
+
+## Definition of done for v1
+
+- WhatsApp -> queued task -> executor -> WhatsApp terminal reply works end-to-end.
+- Risk gates block unsafe side effects without approval.
+- Retry and timeout controls prevent stuck tasks.
+- Audit trail exists in D1 for every task.
+- No secret leakage in logs.

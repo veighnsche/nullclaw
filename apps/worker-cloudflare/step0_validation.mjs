@@ -7,25 +7,129 @@ import { fileURLToPath } from "node:url";
 import worker from "./worker.js";
 import { MockD1Database, MockKVNamespace, MockQueue, signed_request } from "./test_support.mjs";
 
-function run_executor_driver(repo_root, queue_message) {
+const REQUIRED_ZIG_VERSION = "0.15.2";
+
+export class Step0PrerequisiteError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "Step0PrerequisiteError";
+  }
+}
+
+function resolve_zig_bin(env = process.env) {
+  for (const key of ["NULLCLAW_ZIG_BIN", "ZIG"]) {
+    const value = env[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return "zig";
+}
+
+function format_spawn_failure(result) {
+  const parts = [];
+
+  if (typeof result.status === "number") {
+    parts.push(`exit status ${result.status}`);
+  }
+  if (result.signal) {
+    parts.push(`signal ${result.signal}`);
+  }
+
+  const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
+  const stdout = typeof result.stdout === "string" ? result.stdout.trim() : "";
+
+  if (stderr.length > 0) {
+    parts.push(`stderr: ${stderr}`);
+  }
+  if (stdout.length > 0) {
+    parts.push(`stdout: ${stdout}`);
+  }
+
+  return parts.length > 0 ? parts.join("; ") : "no process output";
+}
+
+export function probe_step0_prerequisites(options = {}) {
+  const env = options.env ?? process.env;
+  const zig_bin = options.zig_bin ?? resolve_zig_bin(env);
+  const probe = spawnSync(zig_bin, ["version"], { encoding: "utf8" });
+
+  if (probe.error) {
+    if (probe.error.code === "ENOENT") {
+      return {
+        available: false,
+        zig_bin,
+        reason:
+          `Zig compiler not found (${zig_bin}). Install Zig ${REQUIRED_ZIG_VERSION} and ensure it is on PATH, or set NULLCLAW_ZIG_BIN to an absolute path.`,
+      };
+    }
+
+    return {
+      available: false,
+      zig_bin,
+      reason: `Unable to execute Zig compiler (${zig_bin}): ${probe.error.message}`,
+    };
+  }
+
+  if (probe.status !== 0) {
+    return {
+      available: false,
+      zig_bin,
+      reason: `Zig prerequisite probe failed for ${zig_bin}: ${format_spawn_failure(probe)}`,
+    };
+  }
+
+  return {
+    available: true,
+    zig_bin,
+    detected_version: probe.stdout.trim(),
+  };
+}
+
+function require_step0_prerequisites(options = {}) {
+  const prerequisites = probe_step0_prerequisites(options);
+  if (!prerequisites.available) {
+    throw new Step0PrerequisiteError(
+      `${prerequisites.reason} Step 0 runs locally with no network, but it does require Node.js plus Zig ${REQUIRED_ZIG_VERSION}.`,
+    );
+  }
+  return prerequisites;
+}
+
+function run_executor_driver(repo_root, queue_message, options = {}) {
+  const { zig_bin } = require_step0_prerequisites(options);
   const input_json = `${JSON.stringify(queue_message)}\n`;
-  const result = spawnSync("zig", ["run", "apps/executor/src/step0_validation_driver.zig"], {
+  const result = spawnSync(zig_bin, ["run", "apps/executor/src/step0_validation_driver.zig"], {
     cwd: repo_root,
     input: input_json,
     encoding: "utf8",
   });
 
+  if (result.error) {
+    throw new Error(`executor_driver_spawn_failed (${zig_bin}): ${result.error.message}`);
+  }
+
   if (result.status !== 0) {
-    throw new Error(`executor_driver_failed: ${result.stderr || result.stdout}`);
+    throw new Error(`executor_driver_failed (${zig_bin}): ${format_spawn_failure(result)}`);
   }
 
   const output = result.stdout.trim();
-  return JSON.parse(output);
+  if (output.length === 0) {
+    throw new Error(`executor_driver_failed (${zig_bin}): empty stdout`);
+  }
+
+  try {
+    return JSON.parse(output);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`executor_driver_failed (${zig_bin}): invalid JSON output: ${reason}`);
+  }
 }
 
-export async function run_step0_validation() {
+export async function run_step0_validation(options = {}) {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const repo_root = path.resolve(here, "../..");
+  require_step0_prerequisites(options);
 
   const WHATSAPP_WEBHOOK_SECRET = "step0-secret";
   const env = {
@@ -69,7 +173,7 @@ export async function run_step0_validation() {
   assert.equal(duplicate_body.status, "duplicate_ignored");
   assert.equal(env.TASK_QUEUE.messages.length, 1);
 
-  const terminal_payload = run_executor_driver(repo_root, env.TASK_QUEUE.messages[0]);
+  const terminal_payload = run_executor_driver(repo_root, env.TASK_QUEUE.messages[0], options);
   assert.equal(terminal_payload.task_id, "task-step0");
   assert.equal(terminal_payload.requested_by, "rodger");
   assert.equal(terminal_payload.terminal_status, "succeeded");
@@ -118,7 +222,11 @@ if (is_main_module) {
     })
     .catch((error) => {
       console.error("step0 validation failed");
-      console.error(error instanceof Error ? error.stack : String(error));
+      if (error instanceof Step0PrerequisiteError) {
+        console.error(error.message);
+      } else {
+        console.error(error instanceof Error ? error.stack : String(error));
+      }
       process.exitCode = 1;
     });
 }

@@ -61,6 +61,15 @@ Deterministic Step 0 validation (no network):
 node apps/worker-cloudflare/step0_validation.mjs
 ```
 
+Local prerequisites:
+
+- run from the repository root
+- `node` available locally
+- Zig `0.15.2` available as `zig` on `PATH`, or set `NULLCLAW_ZIG_BIN=/absolute/path/to/zig`
+- no network access is required
+
+If Zig is missing, the script exits early with a prerequisite error instead of a generic executor failure.
+
 This validates:
 
 - ingest webhook -> D1 queued row -> queue handoff

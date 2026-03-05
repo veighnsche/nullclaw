@@ -444,14 +444,16 @@ Status update (March 5, 2026):
 Rodger rollout status:
 
 - friend canary (Rodger): not started yet
+- execution checklist lives in `workflows/rodger/rollout/canary_plan.md`
 
-Step 0 validation milestone (completed March 5, 2026):
+Step 0 validation implementation milestone (landed March 5, 2026):
 
 - [x] deterministic end-to-end validation path:
   - webhook ingest -> D1 queued row -> queue handoff -> executor run -> terminal callback
 - [x] local no-network integration validation script for worker routes (`/` and `/terminal`)
 - [x] strict signature verification (`sha256=<hmac>`)
 - [x] optimistic terminal status transition checks in callback path
+- [x] re-verify the Step 0 test on a machine with `zig` available before internal canary
 
 Next big milestone:
 
