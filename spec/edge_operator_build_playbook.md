@@ -420,12 +420,17 @@ Rodger rollout status:
 
 - friend canary (Rodger): not started yet
 
-Next big milestone (remaining from v1 scope):
+Step 0 validation milestone (completed March 5, 2026):
 
-- Ship a deterministic end-to-end validation path for Step 0:
+- [x] deterministic end-to-end validation path:
   - webhook ingest -> D1 queued row -> queue handoff -> executor run -> terminal callback
-  - include integration tests for worker routes (`/` and `/terminal`) with no real network
-  - add strict signature verification and optimistic status transition checks in callback path
+- [x] local no-network integration validation script for worker routes (`/` and `/terminal`)
+- [x] strict signature verification (`sha256=<hmac>`)
+- [x] optimistic terminal status transition checks in callback path
+
+Next big milestone:
+
+- Step 10 security hardening + Step 11 cost/abuse controls
 
 ## 6) Definition of Done for v1
 

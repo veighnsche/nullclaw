@@ -40,3 +40,19 @@ HTTP routes:
 
 - `POST /` inbound task ingest (queued insert + queue handoff)
 - `POST /terminal` executor terminal update callback
+
+Signature header:
+
+- `x-nullclaw-signature: sha256=<hex_hmac_sha256_of_raw_body>`
+
+Deterministic Step 0 validation (no network):
+
+```bash
+node apps/worker-cloudflare/step0_validation.mjs
+```
+
+This validates:
+
+- ingest webhook -> D1 queued row -> queue handoff
+- Zig executor workflow run (`echo_summary`) via local driver
+- terminal callback -> D1 terminal state/event update

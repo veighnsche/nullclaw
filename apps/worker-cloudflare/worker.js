@@ -77,7 +77,41 @@ async function verify_signature(request, env) {
     return false;
   }
 
-  return provided === env.WHATSAPP_WEBHOOK_SECRET;
+  const provided_parts = provided.split("=");
+  if (provided_parts.length !== 2 || provided_parts[0] !== "sha256") {
+    return false;
+  }
+
+  const body_text = await request.clone().text();
+  const expected_hex = await compute_hmac_sha256_hex(env.WHATSAPP_WEBHOOK_SECRET, body_text);
+  return timing_safe_equal_hex(provided_parts[1], expected_hex);
+}
+
+async function compute_hmac_sha256_hex(secret, message) {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(message));
+  const bytes = new Uint8Array(signature);
+  let hex = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    hex += bytes[i].toString(16).padStart(2, "0");
+  }
+  return hex;
+}
+
+function timing_safe_equal_hex(a, b) {
+  if (a.length !== b.length) return false;
+  let out = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return out === 0;
 }
 
 async function is_duplicate_message(kv, message_id) {
@@ -187,6 +221,20 @@ function format_terminal_message(terminal_status, summary) {
 
 async function append_terminal_event(db, terminal) {
   const now = new Date().toISOString();
+  const update_result = await db
+    .prepare(
+      `UPDATE tasks
+       SET status = ?1, updated_at = ?2, version = version + 1
+       WHERE id = ?3 AND status IN ('queued', 'running', 'waiting_approval')`,
+    )
+    .bind(terminal.terminal_status, now, terminal.task_id)
+    .run();
+
+  const changed_rows = update_result?.meta?.changes ?? update_result?.changes ?? 0;
+  if (changed_rows !== 1) {
+    throw new Error("invalid_terminal_transition");
+  }
+
   await db
     .prepare(
       `INSERT INTO task_events (task_id, event_type, event_payload_json, created_at)
@@ -201,15 +249,6 @@ async function append_terminal_event(db, terminal) {
       }),
       now,
     )
-    .run();
-
-  await db
-    .prepare(
-      `UPDATE tasks
-       SET status = ?1, updated_at = ?2, version = version + 1
-       WHERE id = ?3`,
-    )
-    .bind(terminal.terminal_status, now, terminal.task_id)
     .run();
 }
 
@@ -235,7 +274,15 @@ export default {
         });
       }
 
-      await append_terminal_event(env.TASKS_DB, terminal);
+      try {
+        await append_terminal_event(env.TASKS_DB, terminal);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "terminal_update_failed";
+        if (reason === "invalid_terminal_transition") {
+          return json_response(409, { error: reason, task_id: terminal.task_id });
+        }
+        return json_response(500, { error: reason, task_id: terminal.task_id });
+      }
 
       const message_text = format_terminal_message(terminal.terminal_status, terminal.summary);
       return json_response(200, {
