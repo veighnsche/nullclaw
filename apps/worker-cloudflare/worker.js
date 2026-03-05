@@ -1,5 +1,7 @@
 const ONE_DAY_SECONDS = 24 * 60 * 60;
 const QUEUED_STATUS = "queued";
+const TERMINAL_STATUS_SUCCEEDED = "succeeded";
+const TERMINAL_STATUS_FAILED = "failed";
 
 function json_response(status, body) {
   return new Response(JSON.stringify(body), {
@@ -128,6 +130,66 @@ async function enqueue_task(queue, task) {
   });
 }
 
+function parse_terminal_payload(payload) {
+  if (typeof payload !== "object" || payload === null) {
+    throw new Error("invalid_payload");
+  }
+
+  const task_id = typeof payload.task_id === "string" ? payload.task_id.trim() : "";
+  const requested_by = typeof payload.requested_by === "string" ? payload.requested_by.trim() : "";
+  const terminal_status = typeof payload.terminal_status === "string" ? payload.terminal_status.trim() : "";
+  const summary = typeof payload.summary === "string" ? payload.summary.trim() : "";
+
+  if (task_id.length === 0) throw new Error("missing_task_id");
+  if (requested_by.length === 0) throw new Error("missing_requested_by");
+  if (summary.length === 0) throw new Error("missing_summary");
+  if (terminal_status !== TERMINAL_STATUS_SUCCEEDED && terminal_status !== TERMINAL_STATUS_FAILED) {
+    throw new Error("invalid_terminal_status");
+  }
+
+  return {
+    task_id,
+    requested_by,
+    terminal_status,
+    summary,
+  };
+}
+
+function format_terminal_message(terminal_status, summary) {
+  if (terminal_status === TERMINAL_STATUS_SUCCEEDED) {
+    return `Gelukt: ${summary}`;
+  }
+  return `Niet gelukt, dit is geprobeerd: ${summary}`;
+}
+
+async function append_terminal_event(db, terminal) {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO task_events (task_id, event_type, event_payload_json, created_at)
+       VALUES (?1, 'terminal_update', ?2, ?3)`,
+    )
+    .bind(
+      terminal.task_id,
+      JSON.stringify({
+        requested_by: terminal.requested_by,
+        terminal_status: terminal.terminal_status,
+        summary: terminal.summary,
+      }),
+      now,
+    )
+    .run();
+
+  await db
+    .prepare(
+      `UPDATE tasks
+       SET status = ?1, updated_at = ?2, version = version + 1
+       WHERE id = ?3`,
+    )
+    .bind(terminal.terminal_status, now, terminal.task_id)
+    .run();
+}
+
 export default {
   async fetch(request, env) {
     if (request.method !== "POST") {
@@ -136,6 +198,29 @@ export default {
 
     if (!(await verify_signature(request, env))) {
       return json_response(401, { error: "signature_mismatch" });
+    }
+
+    const url = new URL(request.url);
+
+    if (url.pathname === "/terminal") {
+      let terminal;
+      try {
+        terminal = parse_terminal_payload(await request.json());
+      } catch (error) {
+        return json_response(400, {
+          error: error instanceof Error ? error.message : "invalid_payload",
+        });
+      }
+
+      await append_terminal_event(env.TASKS_DB, terminal);
+
+      const message_text = format_terminal_message(terminal.terminal_status, terminal.summary);
+      return json_response(200, {
+        status: "terminal_recorded",
+        task_id: terminal.task_id,
+        requested_by: terminal.requested_by,
+        message_text,
+      });
     }
 
     let parsed;

@@ -1,17 +1,29 @@
 const std = @import("std");
 const edge = @import("edge");
 const task_runner = @import("task_runner.zig");
+const notifier = @import("notify/whatsapp_terminal_notifier.zig");
 
 pub const ConsumeOutcome = struct {
     task_id: []u8,
     workflow: []u8,
+    requested_by: []u8,
+    channel: []u8,
     terminal_status: edge.contracts.TaskStatus,
     summary: []u8,
 
     pub fn deinit(self: *ConsumeOutcome, allocator: std.mem.Allocator) void {
         allocator.free(self.task_id);
         allocator.free(self.workflow);
+        allocator.free(self.requested_by);
+        allocator.free(self.channel);
         allocator.free(self.summary);
+    }
+
+    pub fn notifier_status(self: ConsumeOutcome) notifier.TerminalStatus {
+        return switch (self.terminal_status) {
+            .succeeded => .succeeded,
+            else => .failed,
+        };
     }
 };
 
@@ -37,6 +49,8 @@ pub fn consume_once(allocator: std.mem.Allocator, raw_message: []const u8) !Cons
     return .{
         .task_id = try allocator.dupe(u8, message.task_id),
         .workflow = try allocator.dupe(u8, message.workflow),
+        .requested_by = try allocator.dupe(u8, message.requested_by),
+        .channel = try allocator.dupe(u8, message.channel),
         .terminal_status = terminal_status,
         .summary = try allocator.dupe(u8, run_result.summary),
     };
@@ -52,5 +66,8 @@ test "consume_once_runs_echo_summary_from_queue_payload" {
 
     try std.testing.expectEqualStrings("task-1", outcome.task_id);
     try std.testing.expectEqualStrings("echo_summary", outcome.workflow);
+    try std.testing.expectEqualStrings("user_a", outcome.requested_by);
+    try std.testing.expectEqualStrings("whatsapp", outcome.channel);
     try std.testing.expectEqual(edge.contracts.TaskStatus.succeeded, outcome.terminal_status);
+    try std.testing.expectEqual(notifier.TerminalStatus.succeeded, outcome.notifier_status());
 }

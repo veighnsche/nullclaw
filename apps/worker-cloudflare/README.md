@@ -8,7 +8,8 @@ Responsibilities:
 - Verify signatures and reject invalid requests.
 - Deduplicate message IDs using KV.
 - Classify risk and enqueue work for downstream execution.
-- Send quick acknowledgements and final status messages.
+- Send quick acknowledgements.
+- Accept executor terminal callbacks and format final status messages.
 
 Non-goals:
 
@@ -34,3 +35,8 @@ Required binding names:
 - `WHATSAPP_DEDUP` (KV)
 - `TASKS_DB` (D1)
 - `TASK_QUEUE` (Queue producer)
+
+HTTP routes:
+
+- `POST /` inbound task ingest (queued insert + queue handoff)
+- `POST /terminal` executor terminal update callback
