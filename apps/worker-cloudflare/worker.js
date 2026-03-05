@@ -1,3 +1,5 @@
+import { compute_hmac_sha256_hex, timing_safe_equal_hex } from "./hmac.mjs";
+
 const ONE_DAY_SECONDS = 24 * 60 * 60;
 const QUEUED_STATUS = "queued";
 const TERMINAL_STATUS_SUCCEEDED = "succeeded";
@@ -90,33 +92,6 @@ async function verify_signature(request, env) {
   const body_text = await request.clone().text();
   const expected_hex = await compute_hmac_sha256_hex(env.WHATSAPP_WEBHOOK_SECRET, body_text);
   return timing_safe_equal_hex(provided_parts[1], expected_hex);
-}
-
-async function compute_hmac_sha256_hex(secret, message) {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(message));
-  const bytes = new Uint8Array(signature);
-  let hex = "";
-  for (let i = 0; i < bytes.length; i += 1) {
-    hex += bytes[i].toString(16).padStart(2, "0");
-  }
-  return hex;
-}
-
-function timing_safe_equal_hex(a, b) {
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return out === 0;
 }
 
 function read_positive_int_env(raw_value, fallback) {
