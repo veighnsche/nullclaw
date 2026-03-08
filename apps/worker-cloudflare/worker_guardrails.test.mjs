@@ -184,3 +184,46 @@ test("worker enforces model token estimate cap", async () => {
   assert.equal(body.max_model_tokens, 2);
   assert.equal(env.TASK_QUEUE.messages.length, 0);
 });
+
+test("worker records waiting_approval callbacks without treating them as failures", async () => {
+  const secret = "guardrails-secret";
+  const env = {
+    WHATSAPP_WEBHOOK_SECRET: secret,
+    WHATSAPP_DEDUP: new MockKVNamespace(),
+    TASKS_DB: new MockD1Database(),
+    TASK_QUEUE: new MockQueue(),
+  };
+
+  const ingest_payload = {
+    task_id: "task-approval-1",
+    message_id: "msg-approval-1",
+    workflow: "social_draft_and_approve",
+    prompt: "launch post",
+    requested_by: "rodger",
+    channel: "whatsapp",
+    risk_level: "medium",
+    action_target: "public_publish",
+  };
+
+  const ingest_response = await worker.fetch(await signed_request("/", ingest_payload, secret), env);
+  assert.equal(ingest_response.status, 200);
+
+  const callback_payload = {
+    task_id: "task-approval-1",
+    requested_by: "rodger",
+    terminal_status: "waiting_approval",
+    summary: "draft generated, approval required",
+    details: '{"draft_text":"launch post"}',
+  };
+  const callback_response = await worker.fetch(
+    await signed_request("/terminal", callback_payload, secret),
+    env,
+  );
+  assert.equal(callback_response.status, 200);
+
+  const body = await callback_response.json();
+  assert.equal(body.status, "terminal_recorded");
+  assert.equal(body.message_text, "Goedkeuring nodig: draft generated, approval required");
+  assert.equal(env.TASKS_DB.tasks.get("task-approval-1").status, "waiting_approval");
+  assert.ok(env.TASKS_DB.task_events[0].event_payload_json.includes('"details":"{\\"draft_text\\":\\"launch post\\"}"'));
+});

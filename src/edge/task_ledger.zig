@@ -66,7 +66,7 @@ pub fn is_valid_status_transition(from: contracts.TaskStatus, to: contracts.Task
             else => false,
         },
         .running => switch (to) {
-            .succeeded, .failed, .canceled => true,
+            .waiting_approval, .succeeded, .failed, .canceled => true,
             else => false,
         },
         .succeeded, .failed, .canceled => false,
@@ -126,6 +126,7 @@ test "build_queued_insert_maps_task_to_queued_row" {
 
 test "is_valid_status_transition_allows_expected_paths" {
     try std.testing.expect(is_valid_status_transition(.queued, .running));
+    try std.testing.expect(is_valid_status_transition(.running, .waiting_approval));
     try std.testing.expect(is_valid_status_transition(.waiting_approval, .queued));
     try std.testing.expect(is_valid_status_transition(.running, .succeeded));
 }

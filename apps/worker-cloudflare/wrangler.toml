@@ -1,8 +1,14 @@
-name = "nullclaw-worker"
+name = "nullclaw-edge-whatsapp"
+account_id = "cf772d0960afaac63a91ba755590e524"
 main = "worker.js"
 compatibility_date = "2026-03-05"
 
-# Thin adapter bindings for ingress handoff.
+# This app is deployed twice from the same source:
+# - default: Vince (`nullclaw-edge-whatsapp`)
+# - `--env rodger`: Rodger (`nullclaw-edge-whatsapp-rodger`)
+#
+# `WHATSAPP_DEDUP` is live today.
+# `TASKS_DB` and `TASK_QUEUE` are still placeholder migration targets.
 [[kv_namespaces]]
 binding = "WHATSAPP_DEDUP"
 id = "REPLACE_WITH_KV_ID"
@@ -13,5 +19,21 @@ database_name = "nullclaw_tasks"
 database_id = "REPLACE_WITH_D1_ID"
 
 [[queues.producers]]
+binding = "TASK_QUEUE"
+queue = "nullclaw-task-queue"
+
+[env.rodger]
+name = "nullclaw-edge-whatsapp-rodger"
+
+[[env.rodger.kv_namespaces]]
+binding = "WHATSAPP_DEDUP"
+id = "REPLACE_WITH_KV_ID"
+
+[[env.rodger.d1_databases]]
+binding = "TASKS_DB"
+database_name = "nullclaw_tasks"
+database_id = "REPLACE_WITH_D1_ID"
+
+[[env.rodger.queues.producers]]
 binding = "TASK_QUEUE"
 queue = "nullclaw-task-queue"

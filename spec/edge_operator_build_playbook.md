@@ -114,7 +114,8 @@ Acceptance:
 
 Create/verify:
 
-- Worker script
+- existing Worker scripts
+- exact Wrangler update path for both deployed instances
 - KV namespace for dedup
 - D1 database for task ledger
 - Queue for async execution
@@ -124,6 +125,9 @@ Commands (example):
 
 ```bash
 cd apps/worker-cloudflare
+export CLOUDFLARE_ACCOUNT_ID=cf772d0960afaac63a91ba755590e524
+npx wrangler deployments list --name nullclaw-edge-whatsapp
+npx wrangler deployments list --name nullclaw-edge-whatsapp-rodger
 npx wrangler kv namespace create WHATSAPP_DEDUP
 npx wrangler d1 create nullclaw_tasks
 npx wrangler queues create nullclaw-task-queue
@@ -131,8 +135,9 @@ npx wrangler queues create nullclaw-task-queue
 
 Acceptance:
 
-- all resource IDs are in `wrangler.toml`
-- bindings visible in `wrangler deploy` output
+- deployed Worker names are confirmed before any config rewrite
+- the dual-Worker Wrangler update path is documented
+- any new D1/Queue resources are treated as a migration step, not assumed to already exist live
 
 ## Step 3 - Add D1 task ledger schema
 

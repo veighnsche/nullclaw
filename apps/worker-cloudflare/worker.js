@@ -4,6 +4,8 @@ const ONE_DAY_SECONDS = 24 * 60 * 60;
 const QUEUED_STATUS = "queued";
 const TERMINAL_STATUS_SUCCEEDED = "succeeded";
 const TERMINAL_STATUS_FAILED = "failed";
+const TERMINAL_STATUS_WAITING_APPROVAL = "waiting_approval";
+const TERMINAL_STATUS_CANCELED = "canceled";
 const VALID_RISK_LEVELS = new Set(["low", "medium", "high"]);
 const VALID_ACTION_TARGETS = new Set(["local", "external_account", "public_publish", "money"]);
 const DEFAULT_DAILY_TASK_LIMIT = 50;
@@ -282,25 +284,44 @@ function parse_terminal_payload(payload) {
   const requested_by = typeof payload.requested_by === "string" ? payload.requested_by.trim() : "";
   const terminal_status = typeof payload.terminal_status === "string" ? payload.terminal_status.trim() : "";
   const summary = typeof payload.summary === "string" ? payload.summary.trim() : "";
+  const details =
+    payload.details === undefined || payload.details === null
+      ? null
+      : typeof payload.details === "string"
+        ? payload.details.trim()
+        : "";
 
   if (task_id.length === 0) throw new Error("missing_task_id");
   if (requested_by.length === 0) throw new Error("missing_requested_by");
   if (summary.length === 0) throw new Error("missing_summary");
-  if (terminal_status !== TERMINAL_STATUS_SUCCEEDED && terminal_status !== TERMINAL_STATUS_FAILED) {
+  if (
+    terminal_status !== TERMINAL_STATUS_SUCCEEDED &&
+    terminal_status !== TERMINAL_STATUS_FAILED &&
+    terminal_status !== TERMINAL_STATUS_WAITING_APPROVAL &&
+    terminal_status !== TERMINAL_STATUS_CANCELED
+  ) {
     throw new Error("invalid_terminal_status");
   }
+  if (details !== null && details.length === 0) throw new Error("invalid_details");
 
   return {
     task_id,
     requested_by,
     terminal_status,
     summary,
+    details,
   };
 }
 
 function format_terminal_message(terminal_status, summary) {
   if (terminal_status === TERMINAL_STATUS_SUCCEEDED) {
     return `Gelukt: ${summary}`;
+  }
+  if (terminal_status === TERMINAL_STATUS_WAITING_APPROVAL) {
+    return `Goedkeuring nodig: ${summary}`;
+  }
+  if (terminal_status === TERMINAL_STATUS_CANCELED) {
+    return `Geannuleerd: ${summary}`;
   }
   return `Niet gelukt, dit is geprobeerd: ${summary}`;
 }
@@ -332,6 +353,7 @@ async function append_terminal_event(db, terminal) {
         requested_by: terminal.requested_by,
         terminal_status: terminal.terminal_status,
         summary: terminal.summary,
+        details: terminal.details,
       }),
       now,
     )

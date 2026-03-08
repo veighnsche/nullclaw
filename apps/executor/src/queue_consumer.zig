@@ -10,8 +10,9 @@ pub const ConsumeOutcome = struct {
     workflow: []u8,
     requested_by: []u8,
     channel: []u8,
-    terminal_status: edge.contracts.TaskStatus,
+    status: edge.contracts.TaskStatus,
     summary: []u8,
+    details: ?[]u8 = null,
 
     pub fn deinit(self: *ConsumeOutcome, allocator: std.mem.Allocator) void {
         allocator.free(self.task_id);
@@ -19,10 +20,11 @@ pub const ConsumeOutcome = struct {
         allocator.free(self.requested_by);
         allocator.free(self.channel);
         allocator.free(self.summary);
+        if (self.details) |value| allocator.free(value);
     }
 
     pub fn notifier_status(self: ConsumeOutcome) notifier.TerminalStatus {
-        return switch (self.terminal_status) {
+        return switch (self.status) {
             .succeeded => .succeeded,
             else => .failed,
         };
@@ -39,23 +41,27 @@ pub fn consume_once(allocator: std.mem.Allocator, raw_message: []const u8) !Cons
     if (!edge.task_ledger.is_valid_status_transition(.queued, .running)) return error.InvalidStateTransition;
     if (message.attempts >= MAX_WORKFLOW_ATTEMPTS) return error.MaxAttemptsExceeded;
 
-    const run_result = task_runner.run_task(message.workflow, message.prompt);
-    const terminal_status: edge.contracts.TaskStatus = switch (run_result.terminal_status) {
-        .succeeded => .succeeded,
-        .failed => .failed,
-    };
+    const run_result = task_runner.run_task(allocator, message.workflow, message.prompt);
+    const next_status = run_result.status;
 
-    if (!edge.task_ledger.is_valid_status_transition(.running, terminal_status)) {
+    if (!edge.task_ledger.is_valid_status_transition(.running, next_status)) {
         return error.InvalidStateTransition;
     }
+
+    const details = if (run_result.details) |value| details: {
+        const copy = try allocator.dupe(u8, value);
+        allocator.free(value);
+        break :details copy;
+    } else null;
 
     return .{
         .task_id = try allocator.dupe(u8, message.task_id),
         .workflow = try allocator.dupe(u8, message.workflow),
         .requested_by = try allocator.dupe(u8, message.requested_by),
         .channel = try allocator.dupe(u8, message.channel),
-        .terminal_status = terminal_status,
+        .status = next_status,
         .summary = try allocator.dupe(u8, run_result.summary),
+        .details = details,
     };
 }
 
@@ -71,7 +77,7 @@ test "consume_once_runs_echo_summary_from_queue_payload" {
     try std.testing.expectEqualStrings("echo_summary", outcome.workflow);
     try std.testing.expectEqualStrings("user_a", outcome.requested_by);
     try std.testing.expectEqualStrings("whatsapp", outcome.channel);
-    try std.testing.expectEqual(edge.contracts.TaskStatus.succeeded, outcome.terminal_status);
+    try std.testing.expectEqual(edge.contracts.TaskStatus.succeeded, outcome.status);
     try std.testing.expectEqual(notifier.TerminalStatus.succeeded, outcome.notifier_status());
 }
 
@@ -80,4 +86,16 @@ test "consume_once_rejects_when_attempts_exhausted" {
         \\{"task_id":"task-1","workflow":"echo_summary","prompt":"hello","requested_by":"user_a","channel":"whatsapp","attempts":3}
     ;
     try std.testing.expectError(error.MaxAttemptsExceeded, consume_once(std.testing.allocator, payload));
+}
+
+test "consume_once_returns_waiting_approval_for_social_draft" {
+    const payload =
+        \\{"task_id":"task-2","workflow":"social_draft_and_approve","prompt":"launch post","requested_by":"user_a","channel":"whatsapp","attempts":0}
+    ;
+
+    var outcome = try consume_once(std.testing.allocator, payload);
+    defer outcome.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(edge.contracts.TaskStatus.waiting_approval, outcome.status);
+    try std.testing.expect(outcome.details != null);
 }

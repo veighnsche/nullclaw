@@ -29,7 +29,7 @@ Done in code:
 - [x] Guardrails exist for signature verification, rate limits, budget caps, prompt size, token estimate limits, and failure cooldowns.
 
 Partial or blocked:
-- [ ] `social_draft_and_approve` exists only as a scaffolded success path; it does not yet drive a real `waiting_approval` lifecycle.
+- [ ] `social_draft_and_approve` now reaches real `waiting_approval` state with persisted draft details, but chat re-entry is not wired yet.
 - [ ] The workflow contract is only partially implemented; current workflow dispatch is still mostly `workflow + prompt -> terminal summary`.
 
 Not started:
@@ -96,26 +96,37 @@ Current status:
 ### PR 3 - deploy the thin edge and executor plumbing
 
 Goal:
-- deploy the worker and executor with real bindings and a reachable callback path
+- align local Wrangler config with the real dual-Worker deployment and update both existing Worker instances safely
+- keep Rodger explicitly non-live until secrets are provisioned
 
 Target files:
 - `apps/worker-cloudflare/wrangler.toml`
 - `apps/worker-cloudflare/README.md`
-- `apps/executor/README.md`
-- deployment manifests or runbooks added by this PR
+- `apps/worker-cloudflare/wrangler_discovery_dump.md`
+- `apps/worker-cloudflare/wrangler_workflow_actual.md`
+- any deploy notes added by this PR
 
 Checklist:
-- [ ] provision real Cloudflare KV, D1, and Queue resources
-- [ ] replace placeholder binding IDs in `wrangler.toml`
-- [ ] deploy the Cloudflare Worker with production bindings
-- [ ] deploy the executor to its first real host
-- [ ] configure the worker-to-executor callback path
-- [ ] configure the real signature secret in the deployment environment
-- [ ] manually execute one end-to-end low-risk `echo_summary` task
+- [x] pin the real Cloudflare account in local Wrangler workflow so non-interactive commands do not guess
+- [x] replace the placeholder single-worker local name with a deployment model that matches both live Workers:
+  - `nullclaw-edge-whatsapp`
+  - `nullclaw-edge-whatsapp-rodger`
+- [ ] verify live binding parity for both Worker instances before deploying code changes
+- current live mismatch:
+  - Vince Worker has WhatsApp/OpenAI secrets configured
+  - Rodger Worker currently has no secrets configured
+- [x] document the exact update command sequence for both Worker instances
+- [ ] deploy the same source program to both existing Worker names via Wrangler
+- [ ] manually verify Vince still responds correctly after the update
+- [ ] confirm Rodger remains explicitly non-live after the update
+- [ ] decide explicitly whether D1 + Queue migration belongs in this PR or a later one
 
 Acceptance:
-- one manual end-to-end `echo_summary` task succeeds
-- terminal callback updates exactly one task row and one task event
+- both Worker instances are updated through Wrangler from the same source program
+- Vince remains the only live secret-backed instance
+- Rodger remains explicitly non-live
+- local deployment docs match the real two-Worker topology
+- no one-worker assumptions remain in the rollout checklist
 
 ### PR 4 - implement a real approval lifecycle for `social_draft_and_approve`
 
@@ -130,14 +141,20 @@ Target files:
 - any worker/executor files needed for approval-state persistence
 
 Checklist:
-- [ ] return `waiting_approval` for draft creation instead of terminal `succeeded`
-- [ ] persist draft summary and approval state in the ledger/event flow
-- [ ] route approve, reject, and revise through the Zig approval parser
+- [x] return `waiting_approval` for draft creation instead of terminal `succeeded`
+- [x] persist draft summary and approval state in the ledger/event flow
+- [x] route approve, reject, and revise through the Zig approval parser
 - [ ] keep external publish side effects disabled
-- [ ] add deterministic tests for `waiting_approval -> queued`, `waiting_approval -> canceled`, and revise flow
+- [x] add deterministic tests for `waiting_approval -> queued`, `waiting_approval -> canceled`, and revise flow
 
 Acceptance:
 - a social draft task can pause, accept an approval command, and resume without external publish side effects
+
+Current status:
+- executor returns `waiting_approval` for `social_draft_and_approve`
+- worker persists `waiting_approval` callbacks and draft details in `task_events`
+- Zig approval helper covers approve, reject, and revise transitions deterministically
+- inbound user approval messages are not wired to this helper yet
 
 ### PR 5 - internal canary
 

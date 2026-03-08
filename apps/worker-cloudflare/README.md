@@ -49,7 +49,9 @@ Optional guardrail env vars:
 HTTP routes:
 
 - `POST /` inbound task ingest (queued insert + queue handoff)
-- `POST /terminal` executor terminal update callback
+- `POST /terminal` executor status update callback
+  - accepts `succeeded`, `failed`, `canceled`, and `waiting_approval`
+  - persists one `task_events` row for each accepted callback
 
 Signature header:
 
@@ -81,3 +83,28 @@ Deterministic regression test:
 ```bash
 node --test apps/worker-cloudflare/step0_validation.test.mjs
 ```
+
+Wrangler deployment model:
+
+- default deploy target: `nullclaw-edge-whatsapp`
+- Rodger deploy target: `nullclaw-edge-whatsapp-rodger`
+- account: `cf772d0960afaac63a91ba755590e524`
+
+Non-interactive deploy/update commands:
+
+```bash
+cd apps/worker-cloudflare
+export CLOUDFLARE_ACCOUNT_ID=cf772d0960afaac63a91ba755590e524
+export CLOUDFLARE_API_TOKEN=...
+bun x wrangler deploy --env \"\" --keep-vars
+bun x wrangler deploy --env rodger --keep-vars
+```
+
+Notes:
+
+- `--keep-vars` avoids deleting dashboard-managed plain-text vars during deploy.
+- only `nullclaw-edge-whatsapp` currently has secrets configured; `nullclaw-edge-whatsapp-rodger` does not.
+- `wrangler deploy` will not create Rodger secrets automatically.
+- for PR 3, treat `nullclaw-edge-whatsapp-rodger` as explicitly non-live until secrets are provisioned.
+- `WHATSAPP_DEDUP` is the only verified live binding today.
+- `TASKS_DB` and `TASK_QUEUE` in [wrangler.toml](/home/vince/Projects/nullclaw/apps/worker-cloudflare/wrangler.toml#L1) are still migration placeholders until D1 + Queue are provisioned live.

@@ -37,11 +37,28 @@ fn buildSignatureHeader(secret: []const u8, payload: []const u8, buf: *[80]u8) !
 }
 
 fn buildTerminalPayload(allocator: std.mem.Allocator, outcome: queue_consumer.ConsumeOutcome) ![]u8 {
-    const terminal_status = switch (outcome.terminal_status) {
+    const status = switch (outcome.status) {
         .succeeded => "succeeded",
-        .failed, .canceled => "failed",
+        .failed => "failed",
+        .canceled => "canceled",
+        .waiting_approval => "waiting_approval",
         else => return error.InvalidTerminalStatus,
     };
+
+    if (outcome.details) |details| {
+        return std.fmt.allocPrint(
+            allocator,
+            \\{{"task_id":{f},"requested_by":{f},"terminal_status":{f},"summary":{f},"details":{f}}}
+        ,
+            .{
+                std.json.fmt(outcome.task_id, .{}),
+                std.json.fmt(outcome.requested_by, .{}),
+                std.json.fmt(status, .{}),
+                std.json.fmt(outcome.summary, .{}),
+                std.json.fmt(details, .{}),
+            },
+        );
+    }
 
     return std.fmt.allocPrint(
         allocator,
@@ -50,7 +67,7 @@ fn buildTerminalPayload(allocator: std.mem.Allocator, outcome: queue_consumer.Co
         .{
             std.json.fmt(outcome.task_id, .{}),
             std.json.fmt(outcome.requested_by, .{}),
-            std.json.fmt(terminal_status, .{}),
+            std.json.fmt(status, .{}),
             std.json.fmt(outcome.summary, .{}),
         },
     );
@@ -142,6 +159,18 @@ test "runOnce_builds_terminal_payload_for_echo_summary" {
     try std.testing.expect(std.mem.containsAtLeast(u8, terminal, 1, "\"task_id\":\"task-1\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, terminal, 1, "\"requested_by\":\"user_a\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, terminal, 1, "\"terminal_status\":\"succeeded\""));
+}
+
+test "runOnce_builds_waiting_approval_payload_for_social_draft" {
+    const payload =
+        \\{"task_id":"task-2","workflow":"social_draft_and_approve","prompt":"launch post","requested_by":"user_a","channel":"whatsapp","attempts":0}
+    ;
+
+    const terminal = try runOnce(std.testing.allocator, payload, null);
+    defer std.testing.allocator.free(terminal);
+
+    try std.testing.expect(std.mem.containsAtLeast(u8, terminal, 1, "\"terminal_status\":\"waiting_approval\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, terminal, 1, "\"details\":\"{\\\"draft_text\\\":\\\"launch post\\\"}\""));
 }
 
 test "runOnce_rejects_empty_input" {
